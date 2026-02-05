@@ -1,0 +1,40 @@
+{
+    "info": {
+        "_postman_id": "trustfundme-ai-collection",
+        "name": "TrustFundMe AI",
+        "description": "Collection to test TrustFundMe AI Service endpoints",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Generate Post",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"prompt\": \"Bé Hải, 6 tuổi, mổ tim, cần 50 triệu, BV Nhi Đồng\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:3000/api/generate-post",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "3000",
+                    "path": [
+                        "api",
+                        "generate-post"
+                    ]
+                }
+            },
+            "response": []
+        }
+    ]
+}
