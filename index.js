@@ -5,7 +5,7 @@ const bodyParser = require('body-parser');
 const aiRoutes = require('./src/routes/aiRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 7000;
 
 // Middleware
 app.use(cors());

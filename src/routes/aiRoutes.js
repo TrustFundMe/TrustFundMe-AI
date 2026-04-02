@@ -69,4 +69,22 @@ router.post('/parse-expenditure-excel', upload.single('file'), async (req, res) 
     }
 });
 
+router.post('/ocr-kyc', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: "Image file is required" });
+        }
+
+        const result = await aiService.ocrKYC(req.file.buffer, req.file.mimetype);
+        res.json(result);
+
+    } catch (error) {
+        console.error('CRITICAL OCR ROUTE ERROR:', error);
+        res.status(500).json({
+            error: "Failed to process image",
+            details: error.message
+        });
+    }
+});
+
 module.exports = router;
