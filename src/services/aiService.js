@@ -13,7 +13,8 @@ const groq = new Groq({
 });
 
 // Using Gemini 2.5 Flash as stable model for 2026 Vision tasks
-const GEMINI_MODEL = "gemini-2.5-flash"; 
+const GEMINI_MODEL = "gemini-2.5-flash";
+const ANALYSIS_MODEL = "llama-3.3-70b-versatile"; 
 
 const generatePost = async (prompt, rules = "") => {
     try {
@@ -129,4 +130,56 @@ Lưu ý quan trọng: Chỉ trả về JSON thuần túy, KHÔNG có ký tự Ma
     return { idNumber: null, fullName: null };
 };
 
-module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC };
+const analyzeFlag = async (targetData, flags) => {
+    const systemPrompt = `Bạn là chuyên gia phân tích rủi ro cho nền tảng quyên góp TrustFundMe. Bạn sẽ phân tích chi tiết chiến dịch/bài viết dựa trên:
+1. Thông tin cơ bản của đối tượng (tiêu đề, mô tả, số liệu tài chính, người tạo...)
+2. Danh sách các báo cáo vi phạm từ người dùng
+
+Hãy đưa ra phân tích khách quan, chi tiết và đề xuất hành động phù hợp cho staff quản lý.
+
+Trả về JSON thuần túy (KHÔNG markdown) với cấu trúc:
+{
+  "summary": "Tóm tắt ngắn 1-2 câu về tình trạng",
+  "riskLevel": "LOW" | "MEDIUM" | "HIGH",
+  "riskScore": số từ 0-100,
+  "keyFindings": ["điểm 1", "điểm 2", ...] (3-5 điểm chính),
+  "concerns": ["lo ngại 1", "lo ngại 2", ...] (các vấn đề đáng chú ý),
+  "recommendation": "đề xuất hành động cụ thể cho staff",
+  "actionTypes": ["HIDE_POST" | "DELETE_POST" | "LOCK_ACCOUNT" | "REQUIRE_DOCUMENT" | "APPROVE" | "WARN_USER"] (các hành động nên thực hiện),
+  "confidence": "LOW" | "MEDIUM" | "HIGH" (mức độ chắc chắn của phân tích)
+}`;
+
+    const prompt = `
+ĐỐI TƯỢNG CẦN PHÂN TÍCH:
+${JSON.stringify(targetData, null, 2)}
+
+DANH SÁCH BÁO CÁO VI PHẠM:
+${flags.map((f, i) => `
+Báo cáo #${i + 1}:
+- Người báo cáo: ${f.reporterName || 'Vô danh'} (ID: ${f.userId})
+- Lý do: "${f.reason}"
+- Ngày: ${f.createdAt}
+- Trạng thái: ${f.status}
+`).join('\n')}
+`.trim();
+
+    try {
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: prompt }
+            ],
+            model: ANALYSIS_MODEL,
+            temperature: 0.3,
+            max_tokens: 2048,
+            response_format: { type: "json_object" }
+        });
+        const result = JSON.parse(completion.choices[0]?.message?.content);
+        return result;
+    } catch (e) {
+        console.error("Flag analysis error:", e);
+        throw e;
+    }
+};
+
+module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag };

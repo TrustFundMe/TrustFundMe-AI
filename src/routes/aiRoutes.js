@@ -87,4 +87,23 @@ router.post('/ocr-kyc', upload.single('file'), async (req, res) => {
     }
 });
 
+router.post('/analyze-flag', async (req, res) => {
+    try {
+        const { targetData, flags } = req.body;
+
+        if (!targetData) {
+            return res.status(400).json({ error: "targetData is required" });
+        }
+        if (!flags || !Array.isArray(flags) || flags.length === 0) {
+            return res.status(400).json({ error: "flags array is required" });
+        }
+
+        const result = await aiService.analyzeFlag(targetData, flags);
+        res.json(result);
+
+    } catch (error) {
+        res.status(500).json({ error: "Failed to analyze flag", details: error.message });
+    }
+});
+
 module.exports = router;
