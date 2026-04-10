@@ -182,4 +182,59 @@ Báo cáo #${i + 1}:
     }
 };
 
-module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag };
+const generateSuggestionLabels = async (params) => {
+    const { amount, options } = params;
+    const systemPrompt = `Bạn là trợ lý gợi ý quyên góp cho nền tảng TrustFundMe.
+Với mỗi tổ hợp vật phẩm, hãy gắn 1 nhãn ngắn gọn (tối đa 5 từ tiếng Việt) phản ánh ĐÚNG NHU CẦU THỰC TẾ trong tổ hợp đó.
+
+QUY TẮC ĐẶT NHÃN:
+- Dựa vào TÊN VẬT PHẨM trong tổ hợp để đặt nhãn
+- Ưu tiên gom nhóm theo loại: lương thực, quần áo, thuốc men, đồ dùng, vv.
+- Nếu tổ hợp có gạo + mì + nước mắm → "Gói lương thực"
+- Nếu có áo quần nhiều → "Gói quần áo"
+- Nếu có đủ các loại → "Gói tổng hợp"
+- Nếu chỉ có 1-2 loại → dùng đúng tên loại đó
+- Nếu diff = 0 hoặc gần 0 → thêm "vừa đủ" hoặc "đủ dùng"
+- KHÔNG dùng nhãn chung chung như "Gói cơ bản", "Tiết kiệm", "Cao cấp"
+
+Ví dụ:
+- {gạo×2, mì×3} → "Gói lương thực"
+- {áo dài×2, quần×1} → "Gói quần áo"
+- {gạo×1, áo×2, thuốc×1} → "Gói tổng hợp"
+
+Trả về JSON thuần túy (KHÔNG markdown):
+{ "labels": ["nhãn 1", "nhãn 2", ...] }`;
+
+    const prompt = `Số tiền quyên góp: ${Number(amount).toLocaleString('vi-VN')} ₫
+
+Danh sách tổ hợp vật phẩm:
+${options.map((opt, i) => `
+Tổ hợp #${i + 1}:
+- Tổng tiền: ${Number(opt.total).toLocaleString('vi-VN')} ₫ (chênh: ${opt.diff >= 0 ? '+' : ''}${Number(opt.diff).toLocaleString('vi-VN')} ₫)
+- Vật phẩm: ${opt.items.map(it => `${it.name} × ${it.quantity} (${Number(it.price).toLocaleString('vi-VN')} ₫/cái)`).join(', ')}
+`).join('')}
+
+Trả về JSON { "labels": [...] }`;
+
+    try {
+        console.log("[labels] calling Groq with amount:", amount, "options:", options.length);
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: prompt }
+            ],
+            model: "llama-3.3-70b-versatile",
+            temperature: 0.4,
+            max_tokens: 512
+        });
+        const raw = completion.choices[0]?.message?.content || '{}';
+        console.log("[labels] Groq raw response:", raw.substring(0, 200));
+        const result = JSON.parse(raw);
+        return Array.isArray(result.labels) ? result.labels : [];
+    } catch (e) {
+        console.error("[labels] Groq error:", e.message);
+        return []; // Graceful — fall back to local labels
+    }
+};
+
+module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag, generateSuggestionLabels };

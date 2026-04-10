@@ -106,4 +106,24 @@ router.post('/analyze-flag', async (req, res) => {
     }
 });
 
+router.post('/generate-suggestion-labels', async (req, res) => {
+    try {
+        const { amount, options } = req.body;
+        console.log("[route] /generate-suggestion-labels called, amount:", amount, "options:", options?.length);
+
+        if (!amount || !options || !Array.isArray(options)) {
+            return res.status(400).json({ error: "amount and options[] are required" });
+        }
+
+        console.log("[route] calling aiService...");
+        const labels = await aiService.generateSuggestionLabels({ amount, options });
+        console.log("[route] labels result:", labels, "type:", typeof labels, "isArray:", Array.isArray(labels));
+        res.json({ labels });
+
+    } catch (error) {
+        console.error("[route] ERROR:", error.message, error.stack);
+        res.status(500).json({ error: "Failed to generate suggestion labels", details: error.message });
+    }
+});
+
 module.exports = router;
