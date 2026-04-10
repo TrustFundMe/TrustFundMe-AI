@@ -182,4 +182,103 @@ Báo cáo #${i + 1}:
     }
 };
 
-module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag };
+const analyzeExpenditure = async (campaign, expenditure, items) => {
+    const systemPrompt = `Bạn là Chuyên gia Kiểm toán Tài chính Cao cấp của TrustFundMe. Bạn có trình độ chuyên môn cao về đối soát chứng từ và giá cả thị trường Việt Nam (2024-2026).
+
+QUY TRÌNH THẨM ĐỊNH (PHẢI TUÂN THỦ):
+
+BƯỚC 0: KIỂM TRA ĐỘ MINH BẠCH (TRANSPARENCY CHECK)
+- Kiểm tra Tên hạng mục VÀ cột Ghi chú (Note): Đây là nơi chứa thông tin Thương hiệu, Thể tích (ml/L), Khối lượng (kg/g), Quy cách (Ví dụ: Tên hàng "Mì tôm", Ghi chú "Thùng 30 gói" là MINH BẠCH).
+- Phải kết hợp dữ liệu giữa Tên VÀ Ghi chú để xác định đơn vị tính thực tế trước khi định giá.
+- Nếu cả Tên và Ghi chú đều thiếu thông tin cốt lõi, phải ghi vào Red Flags: "Thiếu thông tin quy cách để định giá chính xác".
+
+BƯỚC 1: XÁC ĐỊNH ĐƠN VỊ VÀ ĐƠN GIÁ 
+- Sử dụng thông tin trong Ghi chú để làm rõ đơn vị (Thùng vs Chai vs Gói).
+- Mì tôm (Thùng 30 gói): ~110k-145k. 
+- Mì tôm (1 gói lẻ): ~4k-6k.
+- Nước suối (1 chai 500ml): ~4k-6k.
+
+BƯỚC 2: SO SÁNH TOÁN HỌC & GẮN NHÃN BẤT THƯỜNG
+- Nếu Đơn giá < 70% giá sàn thị trường: Gắn nhãn "THẤP BẤT THƯỜNG" (Nghi ngờ hóa đơn ảo hoặc nhầm lẫn đơn vị tính). 
+- Nếu Đơn giá > 130% giá trần thị trường: Gắn nhãn "CAO BẤT THƯỜNG" (Nghi ngờ nâng giá trục lợi).
+- Tuyệt đối không nhầm lẫn giữa "Cao hơn" và "Thấp hơn".
+
+BƯỚC 3: ĐỐI CHIẾU MỤC TIÊU & ĐỊNH MỨC
+- Kiểm tra định mức (Ví dụ: chi 500k tiền nước cho 1 người là lãng phí).
+
+BƯỚC 4: KẾT LUẬN & ĐIỂM RỦI RO
+- Risk Score (0-100): Tăng điểm rủi ro nếu dữ liệu THIẾU MINH BẠCH hoặc BẤT THƯỜNG về giá.
+
+YÊU CẦU NGÔN NGỮ: Chỉ dùng Tiếng Việt. Thái độ khắt khe.
+
+Trả về JSON (KHÔNG markdown):
+{
+  "summary": "Tóm tắt về độ minh bạch và tính hợp lý của đơn giá",
+  "riskLevel": "LOW" | "MEDIUM" | "HIGH",
+  "riskScore": số từ 0-100,
+  "redFlags": ["Mô tả rõ lỗi: 'Dữ liệu thiếu minh bạch: [Tên hàng] không ghi rõ thể tích'", "Lỗi giá: 'Mì tôm 20k/thùng là THẤP BẤT THƯỜNG'", ...],
+  "spendingAnalysis": ["Đánh giá chi tiết sự tương quan giữa đơn giá, thương hiệu và đơn vị tính"],
+  "recommendation": "Duyệt/Từ chối/Yêu cầu giải trình/Yêu cầu bổ sung quy cách hàng hóa chi tiết",
+  "confidence": "LOW" | "MEDIUM" | "HIGH"
+}`;
+
+    const prompt = `
+THÔNG TIN CHIẾN DỊCH:
+- ID: ${campaign.id}
+- Tiêu đề: ${campaign.title || ''}
+- Loại: ${campaign.type || ''} (AUTHORIZED = Quỹ Ủy Quyền, ITEMIZED = Quỹ Mục Tiêu)
+- Trạng thái: ${campaign.status || ''}
+- Số dư quỹ: ${(campaign.balance || 0).toLocaleString()} VND
+- Đã gây quỹ: ${(campaign.campaignRaised || 0).toLocaleString()} VND
+- Mục tiêu: ${(campaign.campaignGoal || 0).toLocaleString()} VND
+- Tiến độ: ${Math.round((campaign.campaignProgress || 0))}%
+- Chủ chiến dịch: ${campaign.campaignAuthor || ''}
+- Mô tả: ${campaign.campaignDescription || ''}
+- Thời gian: ${campaign.campaignStart || ''} → ${campaign.campaignEnd || ''}
+
+THÔNG TIN ĐỢT CHI TIÊU:
+- ID: ${expenditure.id}
+- Kế hoạch: ${expenditure.plan || ''}
+- Trạng thái: ${expenditure.status || ''}
+- Tổng kế hoạch: ${(expenditure.totalExpectedAmount || 0).toLocaleString()} VND
+- Tổng thực chi: ${(expenditure.totalAmount || 0).toLocaleString()} VND
+- Chênh lệch: ${(expenditure.variance || 0).toLocaleString()} VND
+- Trạng thái bằng chứng: ${expenditure.evidenceStatus || 'N/A'}
+- Hạn bằng chứng: ${expenditure.evidenceDueAt || 'Chưa đặt'}
+- Yêu cầu rút tiền: ${expenditure.isWithdrawalRequested ? 'Có' : 'Không'}
+- Số tài khoản nhận: ${expenditure.accountNumber || 'N/A'}
+- Ngân hàng: ${expenditure.bankCode || 'N/A'}
+- Người nhận: ${expenditure.accountHolderName || 'N/A'}
+- Ngày tạo: ${expenditure.createdAt || ''}
+
+DANH SÁCH HẠNG MỤC CHI TIÊU:
+${items && items.length > 0 ? items.map((item, i) => `
+Hạng mục #${i + 1}:
+- Tên: ${item.category || ''}
+- SL kế hoạch: ${item.quantity || 0} x ${(item.expectedPrice || 0).toLocaleString()} = ${((item.quantity || 0) * (item.expectedPrice || 0)).toLocaleString()} VND
+- SL thực tế: ${item.actualQuantity || 0} x ${(item.price || 0).toLocaleString()} = ${((item.actualQuantity || item.quantity || 0) * (item.price || item.expectedPrice || 0)).toLocaleString()} VND
+- Chênh lệch: ${(((item.actualQuantity || item.quantity || 0) * (item.price || item.expectedPrice || 0)) - ((item.quantity || 0) * (item.expectedPrice || 0))).toLocaleString()} VND
+- Ghi chú: ${item.note || ''}
+`).join('\n') : '(Không có danh sách hạng mục)'}
+`.trim();
+
+    try {
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: prompt }
+            ],
+            model: ANALYSIS_MODEL,
+            temperature: 0.0,
+            max_tokens: 2048,
+            response_format: { type: "json_object" }
+        });
+        const result = JSON.parse(completion.choices[0]?.message?.content);
+        return result;
+    } catch (e) {
+        console.error("Expenditure analysis error:", e);
+        throw e;
+    }
+};
+
+module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag, analyzeExpenditure };

@@ -106,4 +106,23 @@ router.post('/analyze-flag', async (req, res) => {
     }
 });
 
+router.post('/analyze-expenditure', async (req, res) => {
+    try {
+        const { campaign, expenditure, items } = req.body;
+
+        if (!campaign) {
+            return res.status(400).json({ error: "campaign is required" });
+        }
+        if (!expenditure) {
+            return res.status(400).json({ error: "expenditure is required" });
+        }
+
+        const result = await aiService.analyzeExpenditure(campaign, expenditure, items || []);
+        res.json(result);
+
+    } catch (error) {
+        res.status(500).json({ error: "Failed to analyze expenditure", details: error.message });
+    }
+});
+
 module.exports = router;
