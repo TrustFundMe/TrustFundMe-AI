@@ -13,7 +13,7 @@ const groq = new Groq({
 });
 
 // Using Gemini 2.5 Flash as stable model for 2026 Vision tasks
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-1.5-flash";
 const ANALYSIS_MODEL = "llama-3.3-70b-versatile"; 
 
 const generatePost = async (prompt, rules = "") => {
@@ -183,42 +183,23 @@ Báo cáo #${i + 1}:
 };
 
 const analyzeExpenditure = async (campaign, expenditure, items) => {
-    const systemPrompt = `Bạn là Chuyên gia Kiểm toán Tài chính Cao cấp của TrustFundMe. Bạn có trình độ chuyên môn cao về đối soát chứng từ và giá cả thị trường Việt Nam (2024-2026).
+    const systemPrompt = `Bạn là Chuyên gia Kiểm toán Tài chính Cao cấp của TrustFundMe. Bạn có trình độ chuyên môn cao về đối soát giá cả thị trường Việt Nam hiện nay.
 
-QUY TRÌNH THẨM ĐỊNH (PHẢI TUÂN THỦ):
+NHIỆM VỤ: Phân tích kế hoạch chi tiêu này và đánh giá rủi ro về giá cả, định mức và tính minh bạch.
 
-BƯỚC 0: KIỂM TRA ĐỘ MINH BẠCH (TRANSPARENCY CHECK)
-- Kiểm tra Tên hạng mục VÀ cột Ghi chú (Note): Đây là nơi chứa thông tin Thương hiệu, Thể tích (ml/L), Khối lượng (kg/g), Quy cách (Ví dụ: Tên hàng "Mì tôm", Ghi chú "Thùng 30 gói" là MINH BẠCH).
-- Phải kết hợp dữ liệu giữa Tên VÀ Ghi chú để xác định đơn vị tính thực tế trước khi định giá.
-- Nếu cả Tên và Ghi chú đều thiếu thông tin cốt lõi, phải ghi vào Red Flags: "Thiếu thông tin quy cách để định giá chính xác".
+CÁC TIÊU CHÍ KIỂM TRA:
+1. MINH BẠCH: Các hạng mục có ghi rõ thương hiệu, quy cách không?
+2. GIÁ CẢ: Đơn giá có phù hợp với thị trường không?
+3. ĐỊNH MỨC: Số lượng mua có phù hợp với quy mô chiến dịch không?
 
-BƯỚC 1: XÁC ĐỊNH ĐƠN VỊ VÀ ĐƠN GIÁ 
-- Sử dụng thông tin trong Ghi chú để làm rõ đơn vị (Thùng vs Chai vs Gói).
-- Mì tôm (Thùng 30 gói): ~110k-145k. 
-- Mì tôm (1 gói lẻ): ~4k-6k.
-- Nước suối (1 chai 500ml): ~4k-6k.
-
-BƯỚC 2: SO SÁNH TOÁN HỌC & GẮN NHÃN BẤT THƯỜNG
-- Nếu Đơn giá < 70% giá sàn thị trường: Gắn nhãn "THẤP BẤT THƯỜNG" (Nghi ngờ hóa đơn ảo hoặc nhầm lẫn đơn vị tính). 
-- Nếu Đơn giá > 130% giá trần thị trường: Gắn nhãn "CAO BẤT THƯỜNG" (Nghi ngờ nâng giá trục lợi).
-- Tuyệt đối không nhầm lẫn giữa "Cao hơn" và "Thấp hơn".
-
-BƯỚC 3: ĐỐI CHIẾU MỤC TIÊU & ĐỊNH MỨC
-- Kiểm tra định mức (Ví dụ: chi 500k tiền nước cho 1 người là lãng phí).
-
-BƯỚC 4: KẾT LUẬN & ĐIỂM RỦI RO
-- Risk Score (0-100): Tăng điểm rủi ro nếu dữ liệu THIẾU MINH BẠCH hoặc BẤT THƯỜNG về giá.
-
-YÊU CẦU NGÔN NGỮ: Chỉ dùng Tiếng Việt. Thái độ khắt khe.
-
-Trả về JSON (KHÔNG markdown):
+CẤU TRÚC TRẢ VỀ (JSON thuần túy, KHÔNG markdown):
 {
-  "summary": "Tóm tắt về độ minh bạch và tính hợp lý của đơn giá",
+  "summary": "Tóm tắt về độ minh bạch và hợp lý của kế hoạch (1-2 câu)",
   "riskLevel": "LOW" | "MEDIUM" | "HIGH",
   "riskScore": số từ 0-100,
-  "redFlags": ["Mô tả rõ lỗi: 'Dữ liệu thiếu minh bạch: [Tên hàng] không ghi rõ thể tích'", "Lỗi giá: 'Mì tôm 20k/thùng là THẤP BẤT THƯỜNG'", ...],
-  "spendingAnalysis": ["Đánh giá chi tiết sự tương quan giữa đơn giá, thương hiệu và đơn vị tính"],
-  "recommendation": "Duyệt/Từ chối/Yêu cầu giải trình/Yêu cầu bổ sung quy cách hàng hóa chi tiết",
+  "redFlags": ["Mô tả lỗi: 'Mì tôm 50k/gói là cao bất thường'", "Thiếu thông tin: 'Không ghi rõ loại sữa'", ...],
+  "spendingAnalysis": ["Đánh giá chi tiết về sự phân bổ ngân sách"],
+  "recommendation": "Đề xuất: 'Duyệt' | 'Yêu cầu sửa đổi' | 'Từ chối'",
   "confidence": "LOW" | "MEDIUM" | "HIGH"
 }`;
 
@@ -337,4 +318,99 @@ Trả về JSON { "labels": [...] }`;
     }
 };
 
-module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag, analyzeExpenditure, generateSuggestionLabels };
+const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, items, photoUrls) => {
+    if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY missing');
+
+    const itemsSummary = (items && items.length > 0)
+        ? items.map((it, i) => `  Hạng mục KẾ HOẠCH #${i+1}: ${it.category || it.name || ''} | SL: ${it.quantity||0} | Đơn giá: ${(it.expectedPrice||0).toLocaleString()} VND | Tổng: ${((it.quantity||0)*(it.expectedPrice||0)).toLocaleString()} VND`).join('\n')
+        : '(Không có danh sách hạng mục kế hoạch)';
+
+    const systemPrompt = `Bạn là Chuyên gia Kiểm toán Tài chính Cao cấp của TrustFundMe. Nhiệm vụ của bạn là phân tích các ảnh minh chứng (hóa đơn, biên lai) và đối chiếu với kế hoạch chi tiêu.
+
+NGUYÊN TẮC QUAN TRỌNG NHẤT (TUÂN THỦ TUYỆT ĐỐI):
+1. KHÔNG TỰ BỊA ĐẶT THÔNG TIN: Chỉ trích xuất những gì THỰC SỰ CÓ trong ảnh. Nếu không có thông tin cửa hàng, địa chỉ, hoặc số điện thoại, hãy ghi là null hoặc "Không xác định". Tuyệt đối không tự bịa tên cửa hàng hay địa chỉ.
+2. GẮN NHÃN PHÁT HIỆN: Phân biệt rõ giữa "Thông tin trên hóa đơn" và "Kế hoạch đã đề ra".
+3. ĐỐI CHIẾU MỤC TIÊU: Xem các món hàng trong hóa đơn có phục vụ cho mục đích "${purpose}" và kế hoạch "${plan}" không.
+4. THÔNG TIN LIÊN HỆ VENDOR: Số điện thoại, địa chỉ, email trong vendorInfo là của CỬA HÀNG / ĐƠN VỊ BÁN HÀNG (bên phát hành hóa đơn) — KHÔNG phải của người mua / chủ quỹ.
+
+CẤU TRÚC TRẢ VỀ (JSON thuần túy, KHÔNG markdown):
+{
+  "summary": "Tóm tắt ngắn gọn tính hợp lệ của hóa đơn (1-2 câu)",
+  "riskLevel": "LOW" | "MEDIUM" | "HIGH",
+  "riskScore": số 0-100,
+  "redFlags": ["Mô tả sai sót: 'Hóa đơn không có ngày tháng'", "Nghi vấn: 'Giá cao bất thường'", ...],
+  "spendingAnalysis": ["Cơ sở lập luận của AI về tính hợp pháp của chứng từ này"],
+  "vendorInfo": {
+    "name": "Tên cửa hàng/đơn vị PHÁT HÀNH hóa đơn (bên bán)",
+    "address": "Địa chỉ của cửa hàng/đơn vị bán hàng",
+    "phone": "Số điện thoại LIÊN HỆ của cửa hàng bán hàng (không phải SĐT người mua)",
+    "email": "Email của cửa hàng nếu có",
+    "taxId": "Mã số thuế của cửa hàng nếu có"
+  },
+  "detectedItems": [
+    {
+      "name": "Tên sản phẩm trích xuất từ ảnh",
+      "quantity": số lượng,
+      "unitPrice": đơn giá,
+      "total": thành tiền,
+      "matchStatus": "MATCHED" (khớp mục tiêu) | "PARTIAL" (gần khớp) | "MISMATCHED" (không có trong kế hoạch),
+      "plannedCategory": "Tên hạng mục trong kế hoạch mà món này khớp vào (nếu có)"
+    }
+  ],
+  "recommendation": "Đề xuất hành động: 'Duyệt' | 'Yêu cầu giải trình' | 'Từ chối'",
+  "confidence": "LOW" | "MEDIUM" | "HIGH"
+}`;
+
+    const userText = `
+THÔNG TIN KẾ HOẠCH CHI TIÊU:
+- Đợt chi: ${plan}
+- Mục đích: ${purpose || ''}
+- Tổng tiền dự kiến: ${(totalAmount||0).toLocaleString()} VND
+- Danh mục kế hoạch:
+${itemsSummary}
+
+YÊU CẦU:
+1. Phân tích (OCR) các ảnh minh chứng kèm theo.
+2. Trích xuất thông tin Vendor (Bên bán).
+3. Liệt kê danh sách sản phẩm THỰC TẾ trên hóa đơn và đối chiếu với Danh mục kế hoạch trên.
+4. KHÔNG BỊA ĐẶT DỮ LIỆU. Nếu ảnh mờ hoặc không có thông tin, hãy báo cáo trung thực.
+`;
+
+    const content = [{ type: 'text', text: userText }];
+
+    for (const url of (photoUrls || []).slice(0, 5)) {
+        try {
+            const imgRes = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
+            const mime = imgRes.headers['content-type'] || 'image/jpeg';
+            const base64 = Buffer.from(imgRes.data).toString('base64');
+            content.push({
+                type: 'image_url',
+                image_url: { url: `data:${mime};base64,${base64}` }
+            });
+        } catch (e) {
+            console.warn('[analyze-evidence] Cannot fetch image:', url, e.message);
+        }
+    }
+
+    try {
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: content }
+            ],
+            model: "meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature: 0.0, // Set to 0 to minimize creativity/hallucination
+            max_tokens: 4096,
+            response_format: { type: "json_object" }
+        });
+
+        const rawResult = completion.choices[0]?.message?.content;
+        return JSON.parse(rawResult);
+    } catch (e) {
+        console.error("Groq-Vision Evidence analysis error:", e.message);
+        throw e;
+    }
+};
+
+module.exports = { generatePost, generateCampaignDescription, parseExpenditureFromText, ocrKYC, analyzeFlag, analyzeExpenditure, analyzeEvidence, generateSuggestionLabels };
+

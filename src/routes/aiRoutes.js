@@ -145,4 +145,22 @@ router.post('/generate-suggestion-labels', async (req, res) => {
     }
 });
 
+router.post('/analyze-evidence', async (req, res) => {
+    try {
+        const { expenditureId, plan, purpose, totalAmount, items, photoUrls } = req.body;
+
+        if (!photoUrls || !Array.isArray(photoUrls) || photoUrls.length === 0) {
+            return res.status(400).json({ error: "photoUrls array is required and must not be empty" });
+        }
+
+        const result = await aiService.analyzeEvidence(expenditureId, plan, purpose, totalAmount, items || [], photoUrls);
+        res.json(result);
+
+    } catch (error) {
+        console.error('[analyze-evidence] Error:', error.message);
+        res.status(500).json({ error: "Failed to analyze evidence", details: error.message });
+    }
+});
+
 module.exports = router;
+
