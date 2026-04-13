@@ -277,11 +277,6 @@ QUY TẮC ĐẶT NHÃN:
 - Nếu diff = 0 hoặc gần 0 → thêm "vừa đủ" hoặc "đủ dùng"
 - KHÔNG dùng nhãn chung chung như "Gói cơ bản", "Tiết kiệm", "Cao cấp"
 
-Ví dụ:
-- {gạo×2, mì×3} → "Gói lương thực"
-- {áo dài×2, quần×1} → "Gói quần áo"
-- {gạo×1, áo×2, thuốc×1} → "Gói tổng hợp"
-
 Trả về JSON thuần túy (KHÔNG markdown):
 { "labels": ["nhãn 1", "nhãn 2", ...] }`;
 
@@ -297,7 +292,6 @@ Tổ hợp #${i + 1}:
 Trả về JSON { "labels": [...] }`;
 
     try {
-        console.log("[labels] calling Groq with amount:", amount, "options:", options.length);
         const completion = await groq.chat.completions.create({
             messages: [
                 { role: "system", content: systemPrompt },
@@ -308,61 +302,62 @@ Trả về JSON { "labels": [...] }`;
             max_tokens: 512,
             response_format: { type: "json_object" }
         });
-        const raw = completion.choices[0]?.message?.content || '{}';
-        console.log("[labels] Groq raw response:", raw.substring(0, 200));
-        const result = JSON.parse(raw);
+        const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
         return Array.isArray(result.labels) ? result.labels : [];
     } catch (e) {
-        console.error("[labels] Groq error:", e.message);
-        return []; // Graceful — fall back to local labels
+        return [];
     }
 };
 
-const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, items, photoUrls) => {
+const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, items, photoUrls, createdAt) => {
     if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY missing');
 
     const itemsSummary = (items && items.length > 0)
         ? items.map((it, i) => `  Hạng mục KẾ HOẠCH #${i+1}: ${it.category || it.name || ''} | SL: ${it.quantity||0} | Đơn giá: ${(it.expectedPrice||0).toLocaleString()} VND | Tổng: ${((it.quantity||0)*(it.expectedPrice||0)).toLocaleString()} VND`).join('\n')
         : '(Không có danh sách hạng mục kế hoạch)';
 
-    const systemPrompt = `Bạn là Chuyên gia Kiểm toán Tài chính Cao cấp của TrustFundMe. Nhiệm vụ của bạn là phân tích các ảnh minh chứng (hóa đơn, biên lai) và đối chiếu với kế hoạch chi tiêu.
+    const systemPrompt = `Bạn là một chuyên gia kiểm toán tài chính (AI Auditor) cho nền tảng TrustFundMe. Nhiệm vụ của bạn là đối soát BẰNG CHỨNG CHI TIÊU (hóa đơn, biên lai) với KẾ HOẠCH CHI TIÊU đã đăng ký.
 
-NGUYÊN TẮC QUAN TRỌNG NHẤT (TUÂN THỦ TUYỆT ĐỐI):
-1. KHÔNG TỰ BỊA ĐẶT THÔNG TIN: Chỉ trích xuất những gì THỰC SỰ CÓ trong ảnh. Nếu không có thông tin cửa hàng, địa chỉ, hoặc số điện thoại, hãy ghi là null hoặc "Không xác định". Tuyệt đối không tự bịa tên cửa hàng hay địa chỉ.
-2. GẮN NHÃN PHÁT HIỆN: Phân biệt rõ giữa "Thông tin trên hóa đơn" và "Kế hoạch đã đề ra".
-3. ĐỐI CHIẾU MỤC TIÊU: Xem các món hàng trong hóa đơn có phục vụ cho mục đích "${purpose}" và kế hoạch "${plan}" không.
-4. THÔNG TIN LIÊN HỆ VENDOR: Số điện thoại, địa chỉ, email trong vendorInfo là của CỬA HÀNG / ĐƠN VỊ BÁN HÀNG (bên phát hành hóa đơn) — KHÔNG phải của người mua / chủ quỹ.
+QUY TẮC NGÀY THÁNG (SIÊU CẤP ĐỘ KHÁCH QUAN):
+1. LUÔN SỬ DỤNG định dạng DD/MM/YYYY trong tất cả văn bản trả về. KHÔNG dùng YYYY-MM-DD.
+2. OCR NGÀY THÁNG THEO NGUYÊN TẮC "LITERAL & HISTORICAL" (CHỮ SAO NGHĨA VẬY): 
+   - TUYỆT ĐỐI CẤM suy luận năm: Thấy ghi ".04" hoặc "/04" thì ĐÓ LÀ NĂM 2004. 
+   - Phải coi đây là hóa đơn từ 22 NĂM TRƯỚC (so với 2026). Đánh dấu rõ "Hóa đơn cũ (2004)" trong redFlags.
+   - KHÔNG ĐƯỢC phép sửa "04" thành "2024" hay "2026". Bất kỳ hành động sửa năm nào đều là vi phạm tính chính trực của Auditor.
+   - Nếu ngày hóa đơn xa hơn 30 ngày so với ngày tạo đợt chi (${createdAt}), bạn PHẢI báo cáo HIGH RISK và khẳng định là GIAN LẬN.
+   - Định dạng văn bản: LUÔN sử dụng DD/MM/YYYY. KHÔNG dùng YYYY-MM-DD.
 
-CẤU TRÚC TRẢ VỀ (JSON thuần túy, KHÔNG markdown):
+QUY TẮC PHÁT HIỆN GIAN LẬN:
+- Đánh giá HIGH RISK nếu phát hiện ngày tháng trên hóa đơn quá cũ so với ngày tạo đợt chi (${createdAt}).
+- Gắn cờ nếu hóa đơn được xuất từ một đơn vị không liên quan đến mục đích chi tiêu "${purpose}".
+
+CẤU TRÚC TRẢ VỀ (JSON thuần túy):
 {
-  "summary": "Tóm tắt ngắn gọn tính hợp lệ của hóa đơn (1-2 câu)",
+  "summary": "Tóm tắt (Sử dụng DD/MM/YYYY)",
   "riskLevel": "LOW" | "MEDIUM" | "HIGH",
-  "riskScore": số 0-100,
-  "redFlags": ["Mô tả sai sót: 'Hóa đơn không có ngày tháng'", "Nghi vấn: 'Giá cao bất thường'", ...],
-  "spendingAnalysis": ["Cơ sở lập luận của AI về tính hợp pháp của chứng từ này"],
-  "vendorInfo": {
-    "name": "Tên cửa hàng/đơn vị PHÁT HÀNH hóa đơn (bên bán)",
-    "address": "Địa chỉ của cửa hàng/đơn vị bán hàng",
-    "phone": "Số điện thoại LIÊN HỆ của cửa hàng bán hàng (không phải SĐT người mua)",
-    "email": "Email của cửa hàng nếu có",
-    "taxId": "Mã số thuế của cửa hàng nếu có"
-  },
+  "riskScore": 0-100,
+  "redFlags": ["Liệt kê nghi vấn cụ thể"],
+  "spendingAnalysis": ["Lập luận chi tiết (SỬ DỤNG DD/MM/YYYY)"],
+  "vendorInfo": { "name": "Bên bán", "address": "Địa chỉ", "phone": "SĐT", "email": "Email", "taxId": "MST" },
   "detectedItems": [
     {
-      "name": "Tên sản phẩm trích xuất từ ảnh",
+      "name": "Sản phẩm",
       "quantity": số lượng,
       "unitPrice": đơn giá,
       "total": thành tiền,
-      "matchStatus": "MATCHED" (khớp mục tiêu) | "PARTIAL" (gần khớp) | "MISMATCHED" (không có trong kế hoạch),
-      "plannedCategory": "Tên hạng mục trong kế hoạch mà món này khớp vào (nếu có)"
+      "matchStatus": "MATCHED" | "PARTIAL" | "MISMATCHED",
+      "plannedCategory": "Hạng mục khớp",
+      "plannedAmount": "Tiền dự kiến",
+      "differenceAmount": "Chênh lệch"
     }
   ],
-  "recommendation": "Đề xuất hành động: 'Duyệt' | 'Yêu cầu giải trình' | 'Từ chối'",
+  "recommendation": "Duyệt / Từ chối / Yêu cầu giải trình",
   "confidence": "LOW" | "MEDIUM" | "HIGH"
 }`;
 
     const userText = `
 THÔNG TIN KẾ HOẠCH CHI TIÊU:
+- Ngày tạo đợt chi: ${createdAt}
 - Đợt chi: ${plan}
 - Mục đích: ${purpose || ''}
 - Tổng tiền dự kiến: ${(totalAmount||0).toLocaleString()} VND
@@ -370,10 +365,10 @@ THÔNG TIN KẾ HOẠCH CHI TIÊU:
 ${itemsSummary}
 
 YÊU CẦU:
-1. Phân tích (OCR) các ảnh minh chứng kèm theo.
-2. Trích xuất thông tin Vendor (Bên bán).
-3. Liệt kê danh sách sản phẩm THỰC TẾ trên hóa đơn và đối chiếu với Danh mục kế hoạch trên.
-4. KHÔNG BỊA ĐẶT DỮ LIỆU. Nếu ảnh mờ hoặc không có thông tin, hãy báo cáo trung thực.
+1. Phân tích OCR và trích xuất ngày tháng hóa đơn.
+2. Kiểm tra xem ngày hóa đơn có hợp lệ với ngày tạo đợt chi không (${createdAt}).
+3. Phát hiện dấu hiệu tái sử dụng ảnh hoặc hóa đơn giả mạo.
+4. KHÔNG BỊA ĐẶT DỮ LIỆU.
 `;
 
     const content = [{ type: 'text', text: userText }];
