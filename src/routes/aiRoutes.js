@@ -75,7 +75,8 @@ router.post('/ocr-kyc', upload.single('file'), async (req, res) => {
             return res.status(400).json({ error: "Image file is required" });
         }
 
-        const result = await aiService.ocrKYC(req.file.buffer, req.file.mimetype);
+        const side = req.body.side || 'front';
+        const result = await aiService.ocrKYC(req.file.buffer, req.file.mimetype, side);
         res.json(result);
 
     } catch (error) {
