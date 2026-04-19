@@ -32,10 +32,24 @@ router.post('/generate-description', async (req, res) => {
         }
 
         const result = await aiService.generateCampaignDescription(prompt, rules);
+
+        // Handle AI refusal or empty response
+        if (!result.description || result.description.trim().length === 0) {
+            return res.status(422).json({
+                error: "AI couldn't generate content for this prompt. Please try rephrasing your input.",
+                retryable: true
+            });
+        }
+
         res.json(result);
 
     } catch (error) {
-        res.status(500).json({ error: "Failed to generate description", details: error.message });
+        console.error("[/generate-description] Error:", error.message);
+        res.status(500).json({
+            error: "Failed to generate description",
+            details: error.message,
+            retryable: true
+        });
     }
 });
 

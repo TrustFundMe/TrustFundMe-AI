@@ -18,11 +18,34 @@ const generatePost = async (prompt, rules = "") => {
 const generateCampaignDescription = async (prompt, rules = "") => {
     try {
         const completion = await groq.chat.completions.create({
-            messages: [{ role: "user", content: `Viết mô tả chiến dịch: ${prompt}\nRules: ${rules}` }],
+            messages: [{
+                role: "user",
+                content: `Bạn là chuyên gia viết mô tả chiến dịch quyên góp từ thiện. Dựa trên thông tin sau, hãy tạo tiêu đề và mô tả chiến dịch bằng tiếng Việt.
+
+Thông tin chiến dịch: ${prompt}
+${rules ? `Quy tắc: ${rules}` : ''}
+
+Hãy trả lời CHÍNH XÁC theo format JSON sau (không có gì khác ngoài JSON):
+{
+  "title": "Tiêu đề chiến dịch (dưới 100 ký tự, xúc tích, gây ấn tượng)",
+  "description": "Mô tả chi tiết chiến dịch (300-800 từ, cảm động, minh bạch, chuyên nghiệp)"
+}`
+            }],
             model: "llama-3.3-70b-versatile",
+            response_format: { type: "json_object" }
         });
-        return completion.choices[0]?.message?.content;
-    } catch (e) { throw e; }
+        const raw = completion.choices[0]?.message?.content;
+        // Parse JSON response — strip markdown code blocks if any
+        const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return {
+            title: parsed.title || "",
+            description: parsed.description || parsed.mo_ta || parsed.moTa || raw
+        };
+    } catch (e) {
+        console.error("[AI] generateCampaignDescription error:", e.message);
+        throw e;
+    }
 };
 
 const parseExpenditureFromText = async (text) => {
