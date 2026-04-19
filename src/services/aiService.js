@@ -33,13 +33,20 @@ const generateCampaignDescription = async (prompt, rules = "") => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `Bạn là chuyên gia viết mô tả chiến dịch quyên góp. Thông tin: ${prompt}. ${rules ? `Quy tắc: ${rules}` : ''}. Trả về JSON: {"title": "...", "description": "..."}`
+                content: `Bạn là một AI chuyên gia viết nội dung từ thiện. 
+Dựa trên thông tin: "${prompt}". 
+Hãy phản hồi DUY NHẤT một khối JSON hợp lệ theo cấu trúc sau (không được giải thích gì thêm, không dùng markdown ngoài khối JSON):
+
+{
+  "title": "Tiêu đề ngắn gọn, cảm động",
+  "description": "Nội dung chi tiết bài viết (dùng định dạng markdown cho nội dung này)"
+}`
             }],
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" }
         });
         const raw = completion.choices[0]?.message?.content;
-        
+
         return safeJsonParse(raw, (txt) => ({
             title: "Chiến dịch quyên góp",
             description: txt || "AI bận hoặc không thể tạo nội dung lúc này."
