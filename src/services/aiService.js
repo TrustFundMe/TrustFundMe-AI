@@ -7,15 +7,25 @@ const groq = new Groq({
 
 // Trích xuất JSON an toàn từ AI
 const safeJsonParse = (text, fallback) => {
-    if (!text) return fallback("{}");
+    if (!text) return fallback("");
     try {
+        // Xử lý Markdown block nếu có
         const cleaned = text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        
+        // Tìm khối {} đầu tiên
         const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        return JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed && typeof parsed === 'object') return parsed;
+        }
+
+        // Thử parse toàn bộ nếu không thấy match regex
+        const parsedAll = JSON.parse(cleaned);
+        if (parsedAll && typeof parsedAll === 'object') return parsedAll;
     } catch (e) {
         console.warn("[AI-Parse-Warning]: Could not parse JSON from AI, using fallback.");
-        return fallback(text);
     }
+    return fallback(text);
 };
 
 const generatePost = async (prompt, rules = "") => {
@@ -35,22 +45,30 @@ const generateCampaignDescription = async (prompt, rules = "") => {
                 role: "user",
                 content: `Bạn là một AI chuyên gia viết nội dung từ thiện. 
 Dựa trên thông tin: "${prompt}". 
-Hãy phản hồi DUY NHẤT một khối JSON hợp lệ theo cấu trúc sau (không được giải thích gì thêm, không dùng markdown ngoài khối JSON):
+Hãy phản hồi một khối JSON hợp lệ theo cấu trúc sau:
 
 {
   "title": "Tiêu đề ngắn gọn, cảm động",
   "description": "Nội dung chi tiết bài viết (dùng định dạng markdown cho nội dung này)"
-}`
+}
+
+Lưu ý: Chỉ trả về JSON, không giải thích gì thêm.`
             }],
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" }
         });
         const raw = completion.choices[0]?.message?.content;
 
-        return safeJsonParse(raw, (txt) => ({
+        const result = safeJsonParse(raw, (txt) => ({
             title: "Chiến dịch quyên góp",
             description: txt || "AI bận hoặc không thể tạo nội dung lúc này."
         }));
+
+        // Đảm bảo luôn có đủ 2 trường title và description để FE không bị lỗi
+        return {
+            title: result.title || "Chiến dịch quyên góp",
+            description: result.description || (typeof result === 'string' ? result : "AI bận hoặc không thể tạo nội dung lúc này.")
+        };
     } catch (e) {
         console.error("[AI] generateCampaignDescription error:", e.message);
         return {
