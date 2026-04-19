@@ -43,13 +43,21 @@ const generateCampaignDescription = async (prompt, rules = "") => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `Bạn là một AI chuyên gia viết nội dung từ thiện. 
-Dựa trên thông tin: "${prompt}". 
-Hãy phản hồi một khối JSON hợp lệ theo cấu trúc sau:
+                content: `Bạn là một chuyên gia viết nội dung truyền cảm hứng cho các chiến dịch từ thiện.
+Dựa trên thông tin: "${prompt}".
 
+Hãy viết nội dung mô tả chiến dịch theo phong cách kể chuyện, cảm động và chân thực.
+YÊU CẦU QUAN TRỌNG:
+1. CHỈ SỬ DỤNG TIẾNG VIỆT. Tuyệt đối không dùng tiếng Anh hay ngôn ngữ khác.
+2. TUYỆT ĐỐI KHÔNG có ký tự lạ, không dùng các ký tự đặc biệt trang trí (chỉ dùng chữ cái, dấu câu cơ bản, và **đậm**).
+3. KHÔNG chia tiêu đề bằng Markdown cấp độ ## (không dùng ## tiêu đề).
+4. KHÔNG bao gồm các phần: "Mục đích", "Cách thức tham gia", "Thông tin liên hệ". 
+5. Tập trung hoàn toàn vào kể kể chuyện, hoàn cảnh và cảm xúc. KHÔNG viết kiểu liệt kê.
+
+Hãy phản hồi một khối JSON hợp lệ theo cấu trúc:
 {
-  "title": "Tiêu đề ngắn gọn, cảm động",
-  "description": "Nội dung chi tiết bài viết (dùng định dạng markdown cho nội dung này)"
+  "title": "Tiêu đề ngắn gọn, sâu sắc (chỉ tiếng Việt, không ký tự lạ)",
+  "description": "Nội dung bài kể chuyện (chỉ tiếng Việt, không ký tự lạ, không dùng ##)"
 }
 
 Lưu ý: Chỉ trả về JSON, không giải thích gì thêm.`
