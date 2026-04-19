@@ -5,6 +5,19 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
+// Trích xuất JSON an toàn từ AI
+const safeJsonParse = (text, fallback) => {
+    if (!text) return fallback("{}");
+    try {
+        const cleaned = text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        return JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+    } catch (e) {
+        console.warn("[AI-Parse-Warning]: Could not parse JSON from AI, using fallback.");
+        return fallback(text);
+    }
+};
+
 const generatePost = async (prompt, rules = "") => {
     try {
         const completion = await groq.chat.completions.create({
@@ -20,31 +33,23 @@ const generateCampaignDescription = async (prompt, rules = "") => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `Bạn là chuyên gia viết mô tả chiến dịch quyên góp từ thiện. Dựa trên thông tin sau, hãy tạo tiêu đề và mô tả chiến dịch bằng tiếng Việt.
-
-Thông tin chiến dịch: ${prompt}
-${rules ? `Quy tắc: ${rules}` : ''}
-
-Hãy trả lời CHÍNH XÁC theo format JSON sau (không có gì khác ngoài JSON):
-{
-  "title": "Tiêu đề chiến dịch (dưới 100 ký tự, xúc tích, gây ấn tượng)",
-  "description": "Mô tả chi tiết chiến dịch (300-800 từ, cảm động, minh bạch, chuyên nghiệp)"
-}`
+                content: `Bạn là chuyên gia viết mô tả chiến dịch quyên góp. Thông tin: ${prompt}. ${rules ? `Quy tắc: ${rules}` : ''}. Trả về JSON: {"title": "...", "description": "..."}`
             }],
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" }
         });
         const raw = completion.choices[0]?.message?.content;
-        // Parse JSON response — strip markdown code blocks if any
-        const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-        const parsed = JSON.parse(cleaned);
-        return {
-            title: parsed.title || "",
-            description: parsed.description || parsed.mo_ta || parsed.moTa || raw
-        };
+        
+        return safeJsonParse(raw, (txt) => ({
+            title: "Chiến dịch quyên góp",
+            description: txt || "AI bận hoặc không thể tạo nội dung lúc này."
+        }));
     } catch (e) {
         console.error("[AI] generateCampaignDescription error:", e.message);
-        throw e;
+        return {
+            title: "Lỗi hệ thống AI",
+            description: `Không thể tạo mô tả: ${e.message}. Hãy thử lại sau ít phút.`
+        };
     }
 };
 
