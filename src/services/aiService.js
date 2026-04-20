@@ -110,7 +110,7 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
     try {
         console.log(`[AI-OCR] Calling Gemini v1beta for ${side} side...`);
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GOOGLE_KEY}`,
+            `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
             {
                 contents: [{
                     parts: [
@@ -156,7 +156,9 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
 
 const fetchImageAsBase64 = async (url) => {
     try {
-        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        // Fix relative URLs — assume they come from FE on localhost:3000
+        const finalUrl = url.startsWith('http') ? url : `http://localhost:3000${url}`;
+        const response = await axios.get(finalUrl, { responseType: 'arraybuffer' });
         const contentType = response.headers['content-type'] || 'image/jpeg';
         const base64 = Buffer.from(response.data, 'binary').toString('base64');
         return { data: base64, mime_type: contentType };
@@ -332,22 +334,29 @@ TRẢ VỀ DUY NHẤT JSON:
 }`;
 
     try {
-        console.log(`[AI-Evidence] Calling Gemini Vision...`);
-        const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_KEY}`,
-            {
-                contents: [{
-                    parts: [
-                        { text: promptText },
-                        ...images.map(img => ({ inline_data: img }))
-                    ]
-                }],
-                generationConfig: { temperature: 0.1, response_mime_type: "application/json" }
-            }
-        );
-        return JSON.parse(response.data.candidates[0].content.parts[0].text);
+        console.log(`[AI-Evidence] Calling Groq Vision (Llama 3.2)...`);
+        const completion = await groq.chat.completions.create({
+            messages: [{
+                role: "user",
+                content: [
+                    { type: "text", text: promptText },
+                    ...images.map(img => ({
+                        type: "image_url",
+                        image_url: { url: `data:${img.mime_type};base64,${img.data}` }
+                    }))
+                ]
+            }],
+            model: "llama-3.2-11b-vision-preview",
+            response_format: { type: "json_object" }
+        });
+
+        const rawText = completion.choices[0]?.message?.content;
+        return safeJsonParse(rawText, (t) => {
+            console.warn("[AI-Evidence] Groq returned invalid JSON, providing fallback.");
+            return { error: "AI không thể trích xuất dữ liệu. Vui lòng kiểm tra lại ảnh minh chứng." };
+        });
     } catch (error) {
-        console.error('[AI-Evidence] Error:', error.message);
+        console.error('[AI-Evidence] Groq Error:', error.message);
         throw error;
     }
 };
