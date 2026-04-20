@@ -283,58 +283,53 @@ const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, planne
 
     if (images.length === 0) return { error: "Không tải được ảnh minh chứng." };
 
-    const promptText = `Bạn là một CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH TỐI CAO. 
-Nhiệm vụ: Đối soát ảnh hóa đơn với kế hoạch chi tiêu.
+    const promptText = `Bạn là một CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH CẤP CAO của TrustFundMe. 
+Nhiệm vụ: Đối soát ảnh hóa đơn với dữ liệu "Đã chi" (Thực tế mua) và thẩm định tính hợp lý của đơn giá.
 
-DỮ LIỆU KẾ HOẠCH:
+DỮ LIỆU ĐÃ CHI (Hệ thống):
 - Mục đích: ${purpose}
-- Đợt: ${plan}
-- Tổng dự kiến: ${totalAmount} VND
-- Danh sách dự kiến: ${JSON.stringify(plannedItems)}
+- Đợt chi: ${plan}
+- Tổng số tiền kê khai: ${totalAmount} VND
+- Danh sách hạng mục ĐÃ CHI: ${JSON.stringify(plannedItems)} (Lưu ý: Chỉ đối soát với danh sách này).
 
-NGUYÊN TẮC KIỂM TOÁN NGHIÊM NGẶT:
-1. TRUY VẾT CHI TIẾT: Đọc từng dòng trên hóa đơn, đối chiếu tên, số lượng, đơn giá với kế hoạch.
+MỤC TIÊU PHÂN TÍCH (YÊU CẦU ĐỘ CHÍNH XÁC CAO):
+1. PHÁT HIỆN SAI LỆCH (ĐỐI SOÁT):
+   - TỔNG CỦA HÓA ĐƠN: Tính tổng tất cả hạng mục trên hóa đơn và so sánh với "Tổng số tiền kê khai" (${totalAmount}).
+     * Bất kể chênh lệch bao nhiêu (dù chỉ 1.000đ), ĐỀU PHẢI liệt kê vào "redFlags" và summary.
+   - SAI LỆCH TỪNG MÓN:
+     * So sánh từng món trong danh sách "Đã chi" với hóa đơn.
+     * Nếu lệch giá hoặc lệch số lượng (DÙ CHỈ MỘT CHÚT), phải ghi rõ tên món và số tiền lệch.
+   - TRUY VẾT MÓN THIẾU: Flag nếu hạng mục có trong danh sách chi nhưng không thấy trên hóa đơn.
 
-2. QUY TẮC MATCH STATUS (RẤT QUAN TRỌNG):
-   - MATCHED: Tìm thấy trong hóa đơn VÀ giá/số lượng khớp hoặc tương đương hợp lý.
-   - PARTIAL: Tìm thấy trong hóa đơn NHƯNG đơn giá hoặc số lượng có sai lệch đáng kể (>20%).
-   - MISMATCHED: Có trong KẾ HOẠCH nhưng KHÔNG TÌM THẤY trong hóa đơn, hoặc mặt hàng hoàn toàn khác.
+2. THẨM ĐỊNH GIÁ THỊ TRƯỜNG (MARKET CHECK):
+   - Baseline tham khảo: Mì tôm (100k-150k/thùng), Gạo (18k-30k/kg), Sữa tươi lốc (24k-32k), Dầu ăn 1L (45k-60k).
+   - Nếu phát hiện đơn giá cao bất thường so với mặt bằng chung (>30%), hãy liệt kê vào "redFlags".
 
-3. QUY TẮC TÍNH RISKSCORE (BẮT BUỘC TUÂN THỦ):
-   - Mỗi hạng mục trong kế hoạch KHÔNG có trong hóa đơn: +25 điểm rủi ro.
-   - Tổng tiền hóa đơn thấp hơn kế hoạch >30%: +20 điểm.
-   - Giá đơn vị bất thường so với thị trường: +15-30 điểm.
-   - Tất cả khớp hoàn toàn: riskScore <= 20 (LOW).
-   - VÍ DỤ: Nếu có 1 hạng mục thiếu trong hóa đơn → riskScore >= 50 (MEDIUM). 2 hạng mục thiếu → riskScore >= 70 (HIGH).
-
-4. KIỂM ĐỊNH GIÁ THỊ TRƯỜNG:
-   - Thùng mì tôm (30 gói) không thể < 60.000đ. Gạo ngon > 18.000đ/kg.
+   - Sai lệch TỔNG TIỀN (>10k): +30 điểm.
+   - Thiếu minh chứng cho hạng mục đã chi: +25 điểm.
+   - Giá cao hơn thị trường/kê khai đáng kể: +15 điểm.
 
 TRẢ VỀ DUY NHẤT JSON:
 {
-  "riskScore": number (0-100, tính theo quy tắc trên),
+  "riskScore": number (0-100),
   "riskLevel": "HIGH" | "MEDIUM" | "LOW",
-  "summary": "Tóm tắt: liệt kê rõ hạng mục nào THIẾU trong hóa đơn",
-  "recommendation": "Đề xuất hành động cụ thể",
-  "redFlags": ["Liệt kê cảnh báo, đặc biệt hạng mục thiếu"],
-  "spendingAnalysis": ["Lập luận chi tiết từng hạng mục"],
+  "summary": "Tóm tắt: Liệt kê NGẮN GỌN các hạng mục có chênh lệch và tổng số tiền chênh lệch của toàn bộ hóa đơn.",
+  "recommendation": "Đề xuất hành động cụ thể.",
+  "redFlags": ["Ghi rõ: Món [Tên] lệch [Số tiền]", "Ghi rõ: Tổng hóa đơn lệch [Số tiền] so với kê khai"],
+  "spendingAnalysis": ["Lập luận ngắn gọn về tính hợp lý của việc chi tiêu"],
   "confidence": "HIGH",
-  "vendorInfo": { 
-    "name": "Tên cửa hàng từ hóa đơn", 
-    "address": "Địa chỉ từ hóa đơn", 
-    "phone": "Số điện thoại từ hóa đơn" 
-  },
+  "vendorInfo": { "name": "...", "address": "...", "phone": "..." },
   "detectedItems": [
     {
-      "name": "Tên hạng mục (từ hóa đơn hoặc kế hoạch nếu thiếu)",
-      "quantity": number (0 nếu không tìm thấy trong hóa đơn),
-      "unitPrice": number (0 nếu không tìm thấy),
+      "name": "Tên món trên hóa đơn",
+      "quantity": number,
+      "unitPrice": number,
       "total": number,
       "matchStatus": "MATCHED" | "PARTIAL" | "MISMATCHED",
-      "plannedCategory": "Tên loại hàng trong kế hoạch",
-      "plannedAmount": number,
-      "differenceAmount": number,
-      "vendor": "Tên cửa hàng"
+      "plannedCategory": "Tên tương ứng trong danh sách đã chi",
+      "plannedAmount": number (Đơn giá đã chi trong hệ thống),
+      "differenceAmount": number (Số tiền chênh lệch thực tế),
+      "marketCheck": "Bình thường" | "Giá cao bất thường"
     }
   ]
 }`;
