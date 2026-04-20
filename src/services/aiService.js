@@ -110,7 +110,7 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
     try {
         console.log(`[AI-OCR] Calling Gemini v1beta for ${side} side...`);
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
             {
                 contents: [{
                     parts: [
@@ -133,21 +133,21 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
         lastError = geminiErr.response?.data?.error?.message || geminiErr.message;
         console.warn("[AI-OCR] Gemini failed:", lastError);
 
-        // 2. Fallback to Groq
+        // 2. Fallback to Groq (dùng đúng promptText theo side)
         try {
-            console.log("[AI-OCR] Fallback to Groq...");
+            console.log(`[AI-OCR] Fallback to Groq (${side} side)...`);
             const completion = await groq.chat.completions.create({
                 messages: [{
                     role: "user",
                     content: [
-                        { type: "text", text: "OCR CCCD sang JSON: {idType, idNumber, fullName, dateOfBirth, gender, placeOfResidence}." },
+                        { type: "text", text: promptText },
                         { type: "image_url", image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Image}` } }
                     ]
                 }],
-                model: "llama-3.2-11b-vision-preview",
+                model: "meta-llama/llama-4-scout-17b-16e-instruct",
                 response_format: { type: "json_object" }
             });
-            return JSON.parse(completion.choices[0]?.message?.content);
+            return safeJsonParse(completion.choices[0]?.message?.content, () => ({ error: 'Groq không thể parse kết quả' }));
         } catch (groqErr) {
             return { error: `Cả 2 AI đều lỗi. Gemini: ${lastError} | Groq: ${groqErr.message}` };
         }
