@@ -291,50 +291,55 @@ DỮ LIỆU KẾ HOẠCH:
 - Tổng dự kiến: ${totalAmount} VND
 - Danh sách dự kiến: ${JSON.stringify(plannedItems)}
 
-NGUYÊN TẮC KIỂM TOÁN TỐI THƯỢNG:
-1. TRUY VẾT CHI TIẾT: So sánh từng chữ trên hóa đơn (Brand, Quy cách đóng gói, Dung tích). 
-   - VD: Nếu kế hoạch là "Nước đóng chai" nhưng hóa đơn là "Lavie 500ml", hãy ghi nhận rõ. 
-   - Nếu hóa đơn không ghi rõ dung tích/nhãn hàng, hãy đánh dấu là "Rủi ro thiếu minh bạch".
-2. KIỂM ĐỊNH GIÁ THỊ TRƯỜNG: 
-   - Sử dụng dữ liệu thực tế: Thùng mì tôm (30 gói) KHÔNG THỂ có giá 7.000đ. Nếu thấy giá này, đây có thể là giá 1 gói nhưng người dùng khai báo là 1 thùng -> Đánh dấu GIAN LẬN thông tin đơn vị tính.
-   - Gạo ngon thường >18.000đ/kg. Nước Aquafina/Lavie 500ml ~90k-110k/thùng.
-3. PHÂN TÍCH MATCH STATUS: 
-   - MATCHED: Khớp hoàn toàn cả tên, số lượng, đơn giá và chủng loại.
-   - PARTIAL: Khớp tên nhưng đơn giá hoặc đơn vị tính (thùng/gói/chai/lốc) có dấu hiệu bất thường.
-   - MISMATCHED: Không có trong kế hoạch hoặc thông tin trên hóa đơn hoàn toàn khác.
-4. TỔNG HỢP RỦI RO: Nếu phát hiện bất kỳ dấu hiệu "ép giá" hoặc "khai khống" số lượng/đơn giá, hãy đặt riskScore > 80.
+NGUYÊN TẮC KIỂM TOÁN NGHIÊM NGẶT:
+1. TRUY VẾT CHI TIẾT: Đọc từng dòng trên hóa đơn, đối chiếu tên, số lượng, đơn giá với kế hoạch.
+
+2. QUY TẮC MATCH STATUS (RẤT QUAN TRỌNG):
+   - MATCHED: Tìm thấy trong hóa đơn VÀ giá/số lượng khớp hoặc tương đương hợp lý.
+   - PARTIAL: Tìm thấy trong hóa đơn NHƯNG đơn giá hoặc số lượng có sai lệch đáng kể (>20%).
+   - MISMATCHED: Có trong KẾ HOẠCH nhưng KHÔNG TÌM THẤY trong hóa đơn, hoặc mặt hàng hoàn toàn khác.
+
+3. QUY TẮC TÍNH RISKSCORE (BẮT BUỘC TUÂN THỦ):
+   - Mỗi hạng mục trong kế hoạch KHÔNG có trong hóa đơn: +25 điểm rủi ro.
+   - Tổng tiền hóa đơn thấp hơn kế hoạch >30%: +20 điểm.
+   - Giá đơn vị bất thường so với thị trường: +15-30 điểm.
+   - Tất cả khớp hoàn toàn: riskScore <= 20 (LOW).
+   - VÍ DỤ: Nếu có 1 hạng mục thiếu trong hóa đơn → riskScore >= 50 (MEDIUM). 2 hạng mục thiếu → riskScore >= 70 (HIGH).
+
+4. KIỂM ĐỊNH GIÁ THỊ TRƯỜNG:
+   - Thùng mì tôm (30 gói) không thể < 60.000đ. Gạo ngon > 18.000đ/kg.
 
 TRẢ VỀ DUY NHẤT JSON:
 {
-  "riskScore": number,
+  "riskScore": number (0-100, tính theo quy tắc trên),
   "riskLevel": "HIGH" | "MEDIUM" | "LOW",
-  "summary": "Tóm tắt sự chênh lệch (nêu rõ các cửa hàng phát hiện)",
-  "recommendation": "Đề xuất hành động",
-  "redFlags": ["Cảnh báo"],
-  "spendingAnalysis": ["Lập luận chi tiết"],
+  "summary": "Tóm tắt: liệt kê rõ hạng mục nào THIẾU trong hóa đơn",
+  "recommendation": "Đề xuất hành động cụ thể",
+  "redFlags": ["Liệt kê cảnh báo, đặc biệt hạng mục thiếu"],
+  "spendingAnalysis": ["Lập luận chi tiết từng hạng mục"],
   "confidence": "HIGH",
   "vendorInfo": { 
-    "name": "string (Danh sách các cửa hàng, cách nhau dấu phẩy)", 
-    "address": "string (Gộp các địa chỉ)", 
-    "phone": "string" 
+    "name": "Tên cửa hàng từ hóa đơn", 
+    "address": "Địa chỉ từ hóa đơn", 
+    "phone": "Số điện thoại từ hóa đơn" 
   },
   "detectedItems": [
     {
-      "name": "Tên hạng mục",
-      "quantity": number,
-      "unitPrice": number,
+      "name": "Tên hạng mục (từ hóa đơn hoặc kế hoạch nếu thiếu)",
+      "quantity": number (0 nếu không tìm thấy trong hóa đơn),
+      "unitPrice": number (0 nếu không tìm thấy),
       "total": number,
       "matchStatus": "MATCHED" | "PARTIAL" | "MISMATCHED",
-      "plannedCategory": "Tên loại hàng",
+      "plannedCategory": "Tên loại hàng trong kế hoạch",
       "plannedAmount": number,
       "differenceAmount": number,
-      "vendor": "Tên cửa hàng mua món này (nếu có trong note/plan)"
+      "vendor": "Tên cửa hàng"
     }
   ]
 }`;
 
     try {
-        console.log(`[AI-Evidence] Calling Groq Vision (Llama 3.2)...`);
+        console.log(`[AI-Evidence] Calling Groq Vision (Llama 4 Scout)...`);
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
@@ -346,7 +351,7 @@ TRẢ VỀ DUY NHẤT JSON:
                     }))
                 ]
             }],
-            model: "llama-3.2-11b-vision-preview",
+            model: "meta-llama/llama-4-scout-17b-16e-instruct",
             response_format: { type: "json_object" }
         });
 
