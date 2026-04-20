@@ -156,8 +156,9 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
 
 const fetchImageAsBase64 = async (url) => {
     try {
-        // Fix relative URLs — assume they come from FE on localhost:3000
-        const finalUrl = url.startsWith('http') ? url : `http://localhost:3000${url}`;
+        // Fix relative URLs — use Vercel FE domain or fallback to localhost
+        const FE_BASE = process.env.FRONTEND_URL || 'https://trust-fund-me-fe.vercel.app';
+        const finalUrl = url.startsWith('http') ? url : `${FE_BASE}${url}`;
         const response = await axios.get(finalUrl, { responseType: 'arraybuffer' });
         const contentType = response.headers['content-type'] || 'image/jpeg';
         const base64 = Buffer.from(response.data, 'binary').toString('base64');
