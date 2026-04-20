@@ -208,10 +208,13 @@ DỮ LIỆU KIỂM TOÁN:
 - Chi tiết hạng mục: ${JSON.stringify(items)}
 
 BẢNG GIÁ THỊ TRƯỜNG THAM KHẢO (MARKET BASELINE):
-- Mì tôm (thùng 30 gói): ~120,000đ.
+- Mì tôm (thùng 30 gói): ~120,000đ - 150,000đ.
 - Nước đóng chai (lốc 6 chai 1.5L): ~100,000đ.
-- Gạo (kg): ~20,000đ.
+- Gạo (kg): ~20,000đ - 25,000đ.
 - Dầu ăn (lít): ~50,000đ.
+- Sữa tươi (lốc 4 hộp x 180ml): ~28,000đ - 35,000đ.
+- Sữa tươi (thùng 48 hộp x 180ml): ~350,000đ - 450,000đ.
+- Trứng gà (vỉ 10 quả): ~30,000đ.
 
 QUY TẮC TÍNH TOÁN & TRÍCH XUẤT (BẮT BUỘC):
 1. ĐỒNG BỘ ĐƠN VỊ TÍNH (QUAN TRỌNG NHẤT): 
@@ -225,42 +228,41 @@ QUY TẮC TÍNH TOÁN & TRÍCH XUẤT (BẮT BUỘC):
      - "Vật phẩm 'Nước đóng chai' có giá 180k/chai là phi thực tế (Giá thị trường ~5k)".
      - "Vật phẩm 'Thùng mì tôm' thiếu nhãn hàng (Hảo Hảo/Omachi)".
    - TUYỆT ĐỐI không được bỏ sót các món giá vô lý trong phần Cảnh báo này.
-3. TRUY VẾT VENDOR TRONG KẾ HOẠCH: Hãy đọc kỹ mục "Nội dung kế hoạch" bên trên. 
+4. TRUY VẾT VENDOR TRONG KẾ HOẠCH: Hãy đọc kỹ mục "Nội dung kế hoạch" bên trên. 
    - Nếu thấy tên cửa hàng, SĐT, địa chỉ -> Phải trích xuất vào "vendorInfo".
-4. TÍNH GIÁ THỊ TRƯỜNG TỔNG: MARKET TOTAL = (Giá Thị TRường Benchmark) x (Số Lượng).
-5. TÍNH CHÊNH LỆCH: differenceAmount = (Tổng người dùng nhập) - (MARKET TOTAL).
-6. ĐÁNH GIÁ TRẠNG THÁI (matchStatus):
+   - PHẢI KIỂM TRA ĐƠN VỊ TÍNH (Lốc/Thùng/Gói) trước khi so sánh giá. 
+   - TUYỆT ĐỐI KHÔNG ảo tưởng giá cao cho đơn vị nhỏ (VD: Lốc sữa 4 hộp chỉ ~30k, đừng nhầm thành 150k - giá đó là của thùng hoặc lốc lớn).
+5. TÍNH GIÁ THỊ TRƯỜNG TỔNG: MARKET TOTAL = (Giá Thị Trường Benchmark) x (Số Lượng). KHÔNG ĐƯỢC ĐỂ TRỐNG HOẶC BẰNG 0.
+6. TÍNH CHÊNH LỆCH: differenceAmount = (Thành tiền người dùng nhập) - (MARKET TOTAL).
+7. ĐÁNH GIÁ TRẠNG THÁI (matchStatus):
    - Món nào giá xấp xỉ thị trường (+/- 10%) -> "MATCHED" (Hợp lý).
    - Món nào giá cao hơn thị trường > 20% -> "PARTIAL" (Xem xét).
    - Món nào giá cao bất thường, Vô lý đơn vị, hoặc THIẾU CHI TIẾT TRẦM TRỌNG -> "MISMATCHED" (Không hợp lý).
+
+LƯU Ý QUAN TRỌNG: AI tuyệt đối KHÔNG được trả về 'marketUnitPrice' hoặc 'total' bằng 0. Nếu không biết giá chính xác, hãy lấy trung bình cộng của 'marketPriceRange'.
 
 TRẢ VỀ DUY NHẤT JSON:
 {
   "riskScore": number,
   "riskLevel": "HIGH" | "MEDIUM" | "LOW",
-  "summary": "Tóm tắt sự chênh lệch (nêu rõ các cửa hàng phát hiện)",
+  "summary": "Tóm tắt sự chênh lệch và tính hợp lý của kế hoạch",
   "recommendation": "Đề xuất hành động",
-  "redFlags": ["Cảnh báo ĐÍCH DANH vật phẩm về GIÁ và THÔNG TIN (VD: Vật phẩm X giá 180k là vô lý)"],
-  "spendingAnalysis": ["Lập luận chi tiết (VD: Giá lốc nước 3.6tr là phi thực tế)"],
+  "redFlags": ["Cảnh báo ĐÍCH DANH vật phẩm về GIÁ và THÔNG TIN"],
+  "spendingAnalysis": ["Lập luận chi tiết ví dụ: Giá lốc sữa 35k/lốc cao hơn thị trường (25k-30k)"],
   "confidence": "HIGH",
-  "vendorInfo": { 
-    "name": "string (Danh sách các cửa hàng)", 
-    "address": "string", 
-    "phone": "string" 
-  },
+  "vendorInfo": { "name": "string", "address": "string", "phone": "string" },
   "detectedItems": [
     {
       "name": "Tên hạng mục",
       "quantity": number,
-      "unitPrice": number,
-      "total": number,
+      "unitPrice": number (Giá người dùng đề xuất),
+      "total": number (Thành tiền dựa trên giá THỊ TRƯỜNG: quantity * marketUnitPrice),
       "matchStatus": "MATCHED" | "PARTIAL" | "MISMATCHED",
       "plannedCategory": "Tên loại hàng",
-      "plannedAmount": number,
-      "differenceAmount": number,
-      "marketUnitPrice": number (Giá thị trường cho 1 đơn vị),
-      "unit": "string (Đơn vị tính: gói, chai, thùng, kg...)",
-      "vendor": "Tên cửa hàng"
+      "marketUnitPrice": number (Giá thị trường trung bình),
+      "marketPriceRange": "string (Ví dụ: '22.000 - 25.000đ')",
+      "unit": "string",
+      "differenceAmount": number (Thành tiền đề xuất - Thành tiền thị trường)
     }
   ]
 }`;
