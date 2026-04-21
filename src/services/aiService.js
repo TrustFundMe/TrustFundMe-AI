@@ -171,20 +171,47 @@ const fetchImageAsBase64 = async (url) => {
 
 const analyzeFlag = async (targetData, flags) => {
     try {
-        const promptText = `Bạn là một chuyên gia quản trị nội dung AI. 
-Hãy phân tích các báo cáo vi phạm và đưa ra đánh giá rủi ro có cấu trúc JSON.
+        const promptText = `Bạn là một CHUYÊN GIA THẨM ĐỊNH RỦI RO HỆ THỐNG. 
+Nhiệm vụ: Phân tích báo cáo vi phạm dựa trên dữ liệu đối tượng và lịch sử người dùng để đưa ra nhận định khách quan, đa chiều.
+THỜI GIAN HIỆN TẠI (Reference): ${new Date().toISOString()}
 
 ĐỐI TƯỢNG BỊ BÁO CÁO: ${JSON.stringify(targetData)}
-DANH SÁCH BẢO CÁO: ${JSON.stringify(flags)}
+DANH SÁCH BÁO CÁO: ${JSON.stringify(flags)}
+
+NGUYÊN TẮC PHÂN TÍCH KHÁCH QUAN (BẮT BUỘC):
+1. GIẢI THÍCH "TẠI SAO": Bạn PHẢI sử dụng CHÍNH XÁC số liệu từ 'targetData'. Tuyệt đối không được tự bịa ra con số không có trong dữ liệu.
+   - THỜI GIAN & QUY MÔ: Bạn PHẢI đề cập rõ chiến dịch được tạo từ khi nào (mới đây hay đã lâu) dựa trên 'createdAt' và 'THỜI GIAN HIỆN TẠI'.
+   - QUYÊN GÓP: Nêu rõ số lượng người đã quyên góp ('donorCount') và số tiền đã nhận được.
+   - ĐƠN VỊ TIỀN TỆ: Luôn sử dụng VND (Việt Nam Đồng). Tuyệt đối không dùng ký hiệu $.
+   - LOGIC TÍNH TỐC ĐỘ:
+     * Bước 1: Tính % Tiền = (raisedAmount / goalAmount) * 100%.
+     * Bước 2: Tính % Thời gian = (Thời gian trôi qua / Tổng thời gian chiến dịch) * 100%.
+     * Bước 3: So sánh 2 tỉ lệ này. Nếu % Tiền lớn hơn rất nhiều so với % Thời gian trôi qua -> "Nhanh".
+     * Khi giải thích, phải nêu rõ: "Dự án đã đạt [Số tiền thực tế] / [Mục tiêu thực tế] (tương đương X%) trong vòng [Y] ngày kể từ khi tạo ([createdAt])..."
+2. CÔNG BẰNG VỚI NGƯỜI DÙNG MỚI: 
+   - Đừng mặc định "Mới tham gia + Điểm thấp = Lừa đảo". Người dùng mới luôn bắt đầu với điểm thấp. (Sử dụng ownerTrustScore và ownerJoinedAt nếu có).
+   - Chỉ đánh giá là "Nghi ngờ" nếu kết hợp thêm các yếu tố khác: nội dung bài viết mâu thuẫn, bị báo cáo lặp lại từ nhiều người khác nhau về cùng một hành vi...
+3. PHÂN LOẠI RỦI RO:
+   - LOW: Thông tin rõ ràng, chủ quỹ mới nhưng chưa có sai phạm.
+   - MEDIUM: Có sự bất hợp lý về thời gian/số tiền hoặc báo cáo có cơ sở nhưng chưa đủ kết luận. 
+4. ĐÁNH GIÁ GIẢI NGÂN (allExpenditures): 
+   - Duyệt danh sách 'allExpenditures'. Nếu có đợt chi nào bất thường, hãy dẫn link trực tiếp.
+   - LINK FORMAT: Sử dụng định dạng [Tên đợt chi](dashboardUrl#expenditure-ID).
+5. TỔNG QUAN & ĐỀ XUẤT:
+   - Trong 'summary', PHẢI có một câu nhận định về mức độ tin cậy dựa trên số lượng người quyên góp ('donorCount') và thời gian hoạt động.
 
 TRẢ VỀ DUY NHẤT JSON:
 {
   "riskScore": number (0-100),
   "riskLevel": "HIGH" | "MEDIUM" | "LOW",
-  "summary": "Tóm tắt ngắn gọn tình hình",
-  "keyFindings": ["Phát hiện 1", "Phát hiện 2"],
-  "recommendation": "Đề xuất hành động cho quản trị viên",
-  "actionTypes": ["LOCK_CAMPAIGN", "SUSPEND_ACCOUNT", "SEND_WARNING", "DELETE_CONTENT"]
+  "summary": "Nhận định tổng quan (Bắt buộc nêu rõ: chiến dịch tạo mới đây hay đã lâu, có bao nhiêu người quyên góp, và rủi ro tổng quát)",
+  "keyFindings": [
+    "Giải thích tốc độ huy động dựa trên tỉ lệ % và thời gian thực tế",
+    "Nhận định về tính minh bạch của các đợt giải ngân (Kèm link [Tên đợt chi](URL) nếu có vấn đề)",
+    "Phân tích tính chất của các báo cáo và uy tín chủ tài khoản dựa trên kinh nghiệm tham gia"
+  ],
+  "recommendation": "Đề xuất hành động công bằng (Kèm link dẫn đến trang tổng quan tại: [dashboardUrl])",
+  "actionTypes": ["LOCK_CAMPAIGN", "SUSPEND_ACCOUNT", "SEND_WARNING", "DELETE_CONTENT", "REQUIRE_DOCUMENT", "APPROVE"]
 }`;
 
         const completion = await groq.chat.completions.create({
