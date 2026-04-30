@@ -154,15 +154,33 @@ const fetchImageAsBase64 = async (url) => {
 const analyzeFlag = async (targetData, flags) => {
     try {
         const dbPrompt = await getPrompt('ai_flag_analysis_prompt');
-        const instruction = dbPrompt || "Bạn là một chuyên gia quản trị nội dung AI. Hãy phân tích các báo cáo vi phạm.";
+        const instruction = dbPrompt || "Bạn là một CHUYÊN GIA THẨM ĐỊNH RỦI RO HỆ THỐNG.";
 
-        const promptText = `${instruction}\n\nĐỐI TƯỢNG BỊ BÁO CÁO: ${JSON.stringify(targetData)}\nDANH SÁCH BẢO CÁO: ${JSON.stringify(flags)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
+        const promptText = `${instruction}\nTHỜI GIAN HIỆN TẠI (Reference): ${new Date().toISOString()}\n\nĐỐI TƯỢNG BỊ BÁO CÁO: ${JSON.stringify(targetData)}\nDANH SÁCH BẢO CÁO: ${JSON.stringify(flags)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
 
         const completion = await groq.chat.completions.create({
             messages: [{ role: "user", content: promptText }],
             model: "llama-3.1-8b-instant",
             response_format: { type: "json_object" }
         });
+        return JSON.parse(completion.choices[0]?.message?.content);
+    } catch (e) { throw e; }
+};
+
+const analyzeExpenditure = async (campaign, expenditure, items) => {
+    try {
+        console.log(`[AI-Expenditure] Analyzing plan: "${expenditure.plan}"`);
+        const dbPrompt = await getPrompt('ai_market_analysis_prompt');
+        const instruction = dbPrompt || "Bạn là một CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH CẤP CAO.";
+
+        const promptText = `${instruction}\n\nDỮ LIỆU KIỂM TOÁN:\n- Chiến dịch: ${campaign.title}\n- Nội dung kế hoạch (Căn cứ địa chỉ/SĐT/Tên người bán): ${expenditure.plan}\n- Chi tiết hạng mục: ${JSON.stringify(items)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
+
+        const completion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: promptText }],
+            model: "llama-3.3-70b-versatile",
+            response_format: { type: "json_object" }
+        });
+
         return JSON.parse(completion.choices[0]?.message?.content);
     } catch (e) { throw e; }
 };
@@ -175,9 +193,9 @@ const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, planne
 
     try {
         const dbPrompt = await getPrompt('ai_bill_analysis_prompt');
-        const instruction = dbPrompt || "Nhiệm vụ: Đối soát ảnh hóa đơn với kế hoạch chi tiêu.";
+        const instruction = dbPrompt || "Bạn là một CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH CẤP CAO của TrustFundMe.";
 
-        const promptText = `${instruction}\n\nDỮ LIỆU KẾ HOẠCH:\n- Mục đích: ${purpose}\n- Đợt: ${plan}\n- Tổng dự kiến: ${totalAmount} VND\n- Danh sách dự kiến: ${JSON.stringify(plannedItems)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
+        const promptText = `${instruction}\n\nDỮ LIỆU ĐÃ CHI (Hệ thống):\n- Mục đích: ${purpose}\n- Đợt chi: ${plan}\n- Tổng số tiền kê khai: ${totalAmount} VND\n- Danh sách hạng mục ĐÃ CHI: ${JSON.stringify(plannedItems)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
 
         console.log(`[AI-Evidence] Calling Groq Vision...`);
         const completion = await groq.chat.completions.create({
@@ -226,7 +244,7 @@ module.exports = {
     parseExpenditureFromText,
     ocrKYC,
     analyzeFlag,
+    analyzeExpenditure,
     analyzeEvidence,
     generateSuggestionLabels
 };
-
