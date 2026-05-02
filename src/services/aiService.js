@@ -1,3 +1,23 @@
+const axios = require('axios');
+const Groq = require('groq-sdk');
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+/**
+ * Safely parse JSON from AI response, handling markdown blocks and fallbacks
+ */
+const safeJsonParse = (text, fallback) => {
+    try {
+        if (!text) return typeof fallback === 'function' ? fallback(text) : fallback;
+        // AI often returns JSON inside markdown code blocks ```json ... ```
+        const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleaned);
+    } catch (e) {
+        console.error("[AI-Parse] Failed to parse JSON:", e.message);
+        if (typeof fallback === 'function') return fallback(text);
+        return fallback;
+    }
+};
+
 // Cache in-memory for prompts to avoid repetitive BE calls
 const promptCache = {};
 
