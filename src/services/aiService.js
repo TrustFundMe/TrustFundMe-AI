@@ -205,6 +205,44 @@ const analyzeExpenditure = async (campaign, expenditure, items) => {
     } catch (e) { throw e; }
 };
 
+const searchInvoiceLinkWithPerplexity = async (vendorName, taxCode) => {
+    try {
+        const apiKey = process.env.PERPLEXITY_API_KEY;
+        if (!apiKey) {
+            console.warn('[AI-Perplexity] Missing PERPLEXITY_API_KEY');
+            return null;
+        }
+
+        const query = `Tìm link trang web chính thức ĐỂ TRA CỨU HÓA ĐƠN ĐIỆN TỬ của doanh nghiệp này (bỏ qua các trang tin tức, chỉ lấy trang tra cứu cấp hóa đơn hoặc trang tra cứu của nhà cung cấp HDDT mà họ dùng). Trả về duy nhất 1 đường link URL, không kèm chữ nào khác. Công ty: ${vendorName || 'Không rõ'}, Mã số thuế: ${taxCode || 'Không rõ'}.`;
+
+        console.log(`[AI-Perplexity] Searching link for ${vendorName} - ${taxCode}...`);
+        const response = await axios.post(
+            'https://api.perplexity.ai/chat/completions',
+            {
+                model: 'sonar-pro', // or sonar depending on availability
+                messages: [
+                    { role: 'system', content: 'Bạn là một cỗ máy tìm kiếm link gốc xác thực. Chỉ trả về URL chính xác, không giải thích.' },
+                    { role: 'user', content: query }
+                ]
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        const content = response.data.choices[0]?.message?.content?.trim();
+        // Extract URL if there's any surrounding text
+        const urlMatch = content.match(/https?:\/\/[^\s]+/);
+        return urlMatch ? urlMatch[0] : null;
+    } catch (error) {
+        console.error('[AI-Perplexity] Error searching invoice link:', error.response?.data || error.message);
+        return null;
+    }
+};
+
 const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, plannedItems, photoUrls, createdAt) => {
     console.log(`[AI-Evidence] Fetching ${photoUrls.length} images...`);
     const images = (await Promise.all(photoUrls.map(url => fetchImageAsBase64(url)))).filter(img => img !== null);
@@ -215,7 +253,7 @@ const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, planne
         const dbPrompt = await getPrompt('ai_bill_analysis_prompt');
         const instruction = dbPrompt || "Bạn là một CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH CẤP CAO của TrustFundMe.";
 
-        const promptText = `${instruction}\n\nDỮ LIỆU ĐÃ CHI (Hệ thống):\n- Mục đích: ${purpose}\n- Đợt chi: ${plan}\n- Tổng số tiền kê khai: ${totalAmount} VND\n- Danh sách hạng mục ĐÃ CHI: ${JSON.stringify(plannedItems)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
+        const promptText = `${instruction}\n\nDỮ LIỆU ĐÃ CHI (Hệ thống):\n- Mục đích: ${purpose}\n- Đợt chi: ${plan}\n- Tổng số tiền kê khai: ${totalAmount} VND\n- Danh sách hạng mục ĐÃ CHI: ${JSON.stringify(plannedItems)}\n\nLƯU Ý QUAN TRỌNG: Phải xác định rõ 'isBill' (có phải ảnh hóa đơn không) và 'isElectronicInvoice' (có phải hóa đơn điện tử không), cùng với 'vendorTaxCode' nếu có. TRẢ VỀ DUY NHẤT JSON.`;
 
         console.log(`[AI-Evidence] Calling Groq Vision...`);
         const completion = await groq.chat.completions.create({
@@ -229,16 +267,32 @@ const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, planne
                     }))
                 ]
             }],
-            model: "meta-llama/llama-4-scout-17b-16e-instruct",
+            model: "meta-llama/llama-4-scout-17b-16e-instruct", // Vision model
             response_format: { type: "json_object" }
         });
 
-        return safeJsonParse(completion.choices[0]?.message?.content, (t) => ({ error: "AI không thể trích xuất dữ liệu." }));
+        const result = safeJsonParse(completion.choices[0]?.message?.content, (t) => ({ error: "AI không thể trích xuất dữ liệu." }));
+
+        // Phase 2: Perplexity lookup if it's an electronic invoice
+        if (!result.error && result.isElectronicInvoice) {
+            const vendorName = result.vendorInfo?.name;
+            const taxCode = result.vendorTaxCode;
+
+            if (vendorName || taxCode) {
+                const lookupLink = await searchInvoiceLinkWithPerplexity(vendorName, taxCode);
+                if (lookupLink) {
+                    result.invoiceLookupLink = lookupLink;
+                }
+            }
+        }
+
+        return result;
     } catch (error) {
         console.error('[AI-Evidence] Groq Error:', error.message);
         throw error;
     }
 };
+
 
 const generateSuggestionLabels = async ({ amount, options }) => {
     try {
