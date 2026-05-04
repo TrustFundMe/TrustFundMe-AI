@@ -213,29 +213,48 @@ const searchInvoiceLinkWithPerplexity = async (vendorName, taxCode) => {
             return null;
         }
 
-        const query = `Tìm link trang web chính thức ĐỂ TRA CỨU HÓA ĐƠN ĐIỆN TỬ của doanh nghiệp này (bỏ qua các trang tin tức, chỉ lấy trang tra cứu cấp hóa đơn hoặc trang tra cứu của nhà cung cấp HDDT mà họ dùng). Trả về duy nhất 1 đường link URL, không kèm chữ nào khác. Công ty: ${vendorName || 'Không rõ'}, Mã số thuế: ${taxCode || 'Không rõ'}.`;
+        // Bước 1: Gọi Sonar-Pro (Agent Mode) để lấy link trực tiếp
+        const query = `Tìm link trang web chính thức ĐỂ TRA CỨU HÓA ĐƠN ĐIỆN TỬ của doanh nghiệp này (bỏ qua các trang tin tức, chỉ lấy trang tra cứu cấp hóa đơn hoặc trang tra cứu của nhà cung cấp HDDT mà họ dùng). 
+        Công ty: ${vendorName || 'Không rõ'}, Mã số thuế: ${taxCode || 'Không rõ'}.
+        Trả về DUY NHẤT 1 đường link URL xác thực nhất.`;
 
-        console.log(`[AI-Perplexity] Searching link for ${vendorName} - ${taxCode}...`);
-        const response = await axios.post(
+        console.log(`[AI-Perplexity] Calling Sonar-Pro for ${vendorName}...`);
+        const sonarResponse = await axios.post(
             'https://api.perplexity.ai/chat/completions',
             {
-                model: 'sonar-pro', // or sonar depending on availability
+                model: 'sonar-pro',
                 messages: [
-                    { role: 'system', content: 'Bạn là một cỗ máy tìm kiếm link gốc xác thực. Chỉ trả về URL chính xác, không giải thích.' },
+                    { role: 'system', content: 'Bạn là chuyên gia tìm kiếm pháp lý. Chỉ trả về 1 URL chính xác nhất để tra cứu hóa đơn, không giải thích.' },
                     { role: 'user', content: query }
-                ]
+                ],
+                temperature: 0
             },
-            {
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                }
-            }
+            { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } }
         );
 
-        const content = response.data.choices[0]?.message?.content?.trim();
-        // Extract URL if there's any surrounding text
-        const urlMatch = content.match(/https?:\/\/[^\s]+/);
+        let content = sonarResponse.data.choices[0]?.message?.content?.trim();
+        let urlMatch = content ? content.match(/https?:\/\/[^\s]+/) : null;
+
+        // Bước 2: Back-up nếu Sonar không ra link hoặc link rác -> Dùng Search API (Search Mode)
+        if (!urlMatch || content.includes('không tìm thấy') || content.length > 300) {
+            console.log(`[AI-Perplexity] Sonar failed. Falling back to Search API...`);
+            const searchResponse = await axios.post(
+                'https://api.perplexity.ai/search',
+                {
+                    query: `trang tra cứu hóa đơn điện tử ${vendorName} ${taxCode}`,
+                    max_results: 5
+                },
+                { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } }
+            );
+
+            const results = searchResponse.data.results || [];
+            if (results.length > 0) {
+                // Lấy kết quả đầu tiên có vẻ là trang tra cứu
+                const bestMatch = results.find(r => r.url.includes('hoadon') || r.url.includes('invoice') || r.title.toLowerCase().includes('tra cứu'));
+                return bestMatch ? bestMatch.url : results[0].url;
+            }
+        }
+
         return urlMatch ? urlMatch[0] : null;
     } catch (error) {
         console.error('[AI-Perplexity] Error searching invoice link:', error.response?.data || error.message);
