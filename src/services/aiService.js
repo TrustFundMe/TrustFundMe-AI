@@ -117,9 +117,9 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
             : "Extract back side ID info to JSON: {issueDate, issuePlace}.");
 
     try {
-        console.log(`[AI-OCR] Calling Gemini v1beta for ${side} side...`);
+        console.log(`[AI-OCR] Calling Gemini v1 for ${side} side...`);
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
+            `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
             {
                 contents: [{
                     parts: [
@@ -127,8 +127,9 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
                         { inline_data: { mime_type: mimeType || "image/jpeg", data: base64Image } }
                     ]
                 }],
-                generationConfig: { temperature: 0.0, topK: 1, topP: 0.1 }
-            }
+                generationConfig: { temperature: 0.1, topK: 1, topP: 0.1 }
+            },
+            { timeout: 30000 } // 30s timeout
         );
 
         const text = response.data.candidates[0].content.parts[0].text;
