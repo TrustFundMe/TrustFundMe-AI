@@ -66,7 +66,7 @@ const generateCampaignDescription = async (prompt, rules = "") => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `${instruction}\nDựa trên thông tin: "${prompt}".`
+                content: `${instruction}\nDựa trên thông tin: "${prompt}".\nTrả về kết quả dưới dạng JSON.`
             }],
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" }
@@ -94,7 +94,7 @@ const generateCampaignDescription = async (prompt, rules = "") => {
 const parseExpenditureFromText = async (text) => {
     try {
         const completion = await groq.chat.completions.create({
-            messages: [{ role: "user", content: `Parse JSON items: ${text}` }],
+            messages: [{ role: "user", content: `Parse JSON items from the following text. Return a JSON object with an "items" array: ${text}` }],
             model: "llama-3.1-8b-instant",
             response_format: { type: "json_object" }
         });
@@ -144,7 +144,7 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
                 messages: [{
                     role: "user",
                     content: [
-                        { type: "text", text: promptText },
+                        { type: "text", text: `${promptText}\nOutput MUST be a valid JSON.` },
                         { type: "image_url", image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Image}` } }
                     ]
                 }],
@@ -322,7 +322,7 @@ const generateSuggestionLabels = async ({ amount, options }) => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `${instruction}\nDựa trên số tiền ${amount} và các lựa chọn ${JSON.stringify(options)}.`
+                content: `${instruction}\nDựa trên số tiền ${amount} và các lựa chọn ${JSON.stringify(options)}.\nTrả về JSON chứa mảng labels.`
             }],
             model: "llama-3.1-8b-instant",
             response_format: { type: "json_object" }
