@@ -41,6 +41,7 @@ router.post('/generate-description', async (req, res) => {
             });
         }
 
+        console.log(`[/generate-description] ✅ Sending response. Result size: ${JSON.stringify(result).length} chars`);
         res.json(result);
 
     } catch (error) {
@@ -97,6 +98,24 @@ router.post('/ocr-kyc', upload.single('file'), async (req, res) => {
         console.error('CRITICAL OCR ROUTE ERROR:', error);
         res.status(500).json({
             error: "Failed to process image",
+            details: error.message
+        });
+    }
+});
+
+router.post('/ocr-bill', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: "Image file is required" });
+        }
+
+        const result = await aiService.ocrBill(req.file.buffer, req.file.mimetype);
+        res.json(result);
+
+    } catch (error) {
+        console.error('CRITICAL OCR BILL ROUTE ERROR:', error);
+        res.status(500).json({
+            error: "Failed to process bill image",
             details: error.message
         });
     }
@@ -169,11 +188,21 @@ router.post('/analyze-evidence', async (req, res) => {
         }
 
         const result = await aiService.analyzeEvidence(expenditureId, plan, purpose, totalAmount, items || [], photoUrls, createdAt);
+        
+        if (!result || typeof result !== 'object') {
+            throw new Error("AI Service returned an invalid result format (not an object)");
+        }
+
+        console.log(`[analyze-evidence] ✅ Sending response to client. Result size: ${JSON.stringify(result).length} chars`);
         res.json(result);
 
     } catch (error) {
-        console.error('[analyze-evidence] Error:', error.message);
-        res.status(500).json({ error: "Failed to analyze evidence", details: error.message });
+        console.error('[analyze-evidence] CRITICAL PIPELINE ERROR:', error.message, error.stack);
+        res.status(500).json({ 
+            error: "Failed to analyze evidence pipeline", 
+            details: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 

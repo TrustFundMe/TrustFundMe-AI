@@ -2,6 +2,7 @@ const axios = require('axios');
 const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { runForensics } = require('./forensicsEngine');
+const DEFAULT_PROMPTS = require('../config/prompts');
 
 /**
  * Safely parse JSON from AI response, handling markdown blocks and fallbacks
@@ -55,7 +56,7 @@ const getPrompt = async (key) => {
 const generatePost = async (prompt, rules = "") => {
     try {
         const dbPrompt = await getPrompt('ai_post_generation_prompt');
-        const instruction = dbPrompt || "Viết bài đăng truyền cảm hứng.";
+        const instruction = dbPrompt || DEFAULT_PROMPTS.ai_post_generation_prompt;
 
         const completion = await groq.chat.completions.create({
             messages: [{ role: "user", content: `${instruction}\nNội dung: ${prompt}\nRules: ${rules}` }],
@@ -68,7 +69,7 @@ const generatePost = async (prompt, rules = "") => {
 const generateCampaignDescription = async (prompt, rules = "") => {
     try {
         const dbPrompt = await getPrompt('ai_campaign_description_prompt');
-        const instruction = dbPrompt || "Bạn là một chuyên gia viết nội dung truyền cảm hứng cho các chiến dịch từ thiện.";
+        const instruction = dbPrompt || DEFAULT_PROMPTS.ai_campaign_description_prompt;
 
         const completion = await groq.chat.completions.create({
             messages: [{
@@ -101,7 +102,7 @@ const generateCampaignDescription = async (prompt, rules = "") => {
 const parseExpenditureFromText = async (text) => {
     try {
         const dbPrompt = await getPrompt('ai_expenditure_parse_prompt');
-        const instruction = dbPrompt || "Parse JSON items from text.";
+        const instruction = dbPrompt || DEFAULT_PROMPTS.ai_expenditure_parse_prompt;
 
         const completion = await groq.chat.completions.create({
             messages: [{ role: "user", content: `${instruction}\nText: ${text}` }],
@@ -120,17 +121,15 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
     const ocrConfig = await getPrompt('ai_ocr_prompt');
     const promptText = (ocrConfig && ocrConfig[side])
         ? ocrConfig[side]
-        : (side === 'front'
-            ? "Extract front side ID info to JSON: {idType, idNumber, fullName, dateOfBirth, gender, placeOfOrigin, placeOfResidence, expiryDate, issueDate, issuePlace}."
-            : "Extract back side ID info to JSON: {issueDate, issuePlace}.");
+        : DEFAULT_PROMPTS.ai_ocr_prompt[side];
 
     try {
-        console.log(`[AI-OCR] Calling Gemini v1 for ${side} side...`);
+        console.log(`[AI-OCR] Calling Gemini 2.0 Flash for ${side} side...`);
         const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
         if (!GOOGLE_KEY) throw new Error("Missing GOOGLE_API_KEY in environment");
 
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_KEY}`,
             {
                 contents: [{
                     parts: [
@@ -150,7 +149,7 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
         console.warn("[AI-OCR] Gemini failed:", lastError);
 
         try {
-            console.log(`[AI-OCR] Fallback to Groq (${side} side)...`);
+            console.log(`[AI-OCR] Fallback to Groq Llama-4 (${side} side)...`);
             const completion = await groq.chat.completions.create({
                 messages: [{
                     role: "user",
@@ -159,7 +158,7 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
                         { type: "image_url", image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Image}` } }
                     ]
                 }],
-                model: "llama-3.2-90b-vision-preview",
+                model: "meta-llama/llama-4-scout-17b-16e-instruct",
                 response_format: { type: "json_object" }
             });
             return safeJsonParse(completion.choices[0]?.message?.content, () => ({ error: 'Groq không thể parse kết quả' }));
@@ -179,9 +178,32 @@ const normalizeUrl = (url) => {
 const fetchImageAsBase64 = async (url) => {
     try {
         const finalUrl = normalizeUrl(url);
+        console.log(`[AI-Fetch] Fetching: ${finalUrl}`);
         const response = await axios.get(finalUrl, { responseType: 'arraybuffer' });
-        const contentType = response.headers['content-type'] || 'image/jpeg';
-        const base64 = Buffer.from(response.data, 'binary').toString('base64');
+        let contentType = response.headers['content-type'] || 'image/jpeg';
+        let data = response.data;
+
+        // Nếu là HTML, thử tìm ảnh trong đó (Scrape logic)
+        if (contentType.includes('text/html')) {
+            console.warn(`[AI-Fetch] ⚠ URL is HTML, attempting to find image tags...`);
+            const html = Buffer.from(data).toString('utf-8');
+            // Regex linh hoạt hơn, bắt được cả các link có query params (như Supabase/Firebase)
+            const imgRegex = /https?:\/\/[^"'>\s]+?\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'>\s]*)?/gi;
+            const matches = html.match(imgRegex);
+            
+            if (matches && matches.length > 0) {
+                // Ưu tiên các link chứa 'media' hoặc 'storage' vì đó thường là ảnh minh chứng
+                const imgUrl = matches.find(m => (m.includes('media') || m.includes('storage')) && !m.includes('logo') && !m.includes('avatar')) || matches[0];
+                if (imgUrl) {
+                    console.log(`[AI-Fetch] 🎯 Found image in HTML: ${imgUrl}`);
+                    return fetchImageAsBase64(imgUrl); // Đệ quy để lấy ảnh thật
+                }
+            }
+            console.error(`[AI-Fetch] ❌ No image found in HTML page.`);
+            return null;
+        }
+
+        const base64 = Buffer.from(data, 'binary').toString('base64');
         return { data: base64, mime_type: contentType };
     } catch (error) {
         console.error(`[AI-Fetch] Failed to fetch image from ${url}:`, error.message);
@@ -192,7 +214,7 @@ const fetchImageAsBase64 = async (url) => {
 const analyzeFlag = async (targetData, flags) => {
     try {
         const dbPrompt = await getPrompt('ai_flag_analysis_prompt');
-        const instruction = dbPrompt || "Bạn là một CHUYÊN GIA THẨM ĐỊNH RỦI RO HỆ THỐNG.";
+        const instruction = dbPrompt || DEFAULT_PROMPTS.ai_flag_analysis_prompt;
 
         const promptText = `${instruction}\nTHỜI GIAN HIỆN TẠI (Reference): ${new Date().toISOString()}\n\nĐỐI TƯỢNG BỊ BÁO CÁO: ${JSON.stringify(targetData)}\nDANH SÁCH BẢO CÁO: ${JSON.stringify(flags)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
 
@@ -209,9 +231,9 @@ const analyzeExpenditure = async (campaign, expenditure, items) => {
     try {
         console.log(`[AI-Expenditure] Analyzing plan: "${expenditure.plan}"`);
         const dbPrompt = await getPrompt('ai_market_analysis_prompt');
-        const instruction = dbPrompt || "Bạn là một CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH CẤP CAO.";
+        const instruction = dbPrompt || DEFAULT_PROMPTS.ai_market_analysis_prompt;
 
-        const promptText = `${instruction}\n\nDỮ LIỆU KIỂM TOÁN:\n- Chiến dịch: ${campaign.title}\n- Nội dung kế hoạch (Căn cứ địa chỉ/SĐT/Tên người bán): ${expenditure.plan}\n- Chi tiết hạng mục: ${JSON.stringify(items)}\n\nTRẢ VỀ DUY NHẤT JSON.`;
+        const promptText = `${instruction}\n\nDỮ LIỆU KIỂM TOÁN:\n- Chiến dịch: ${campaign.title}\n- Nội dung kế hoạch (Căn cứ địa chỉ/SĐT/Tên người bán): ${expenditure.plan}\n- Chi tiết hạng mục: ${JSON.stringify(items)}\n\nLƯU Ý QUAN TRỌNG: Nếu không tìm thấy sản phẩm hoặc không xác định được giá, hãy để marketPriceMin và marketPriceMax là 0. TUYỆT ĐỐI KHÔNG để giá trị âm (-1).\n\nTRẢ VỀ DUY NHẤT JSON.`;
 
         const completion = await groq.chat.completions.create({
             messages: [{ role: "user", content: promptText }],
@@ -280,82 +302,196 @@ const searchInvoiceLinkWithPerplexity = async (vendorName, taxCode) => {
     }
 };
 
-const extractBillDataWithGroq = async (base64Image, mimeType) => {
-    const dbPrompt = await getPrompt('ai_ocr_bill_prompt');
-    const promptText = dbPrompt || `Bạn là chuyên gia bóc tách hóa đơn (OCR Invoice Expert). 
-    NHIỆM VỤ: Hãy đọc ảnh và trích xuất TOÀN BỘ danh sách các mặt hàng/dịch vụ có trong hóa đơn. 
-    YÊU CẦU TRẢ VỀ JSON: { 
-      "isBill": true, 
-      "vendorName": "Tên công ty/cửa hàng", 
-      "vendorTaxCode": "Mã số thuế", 
-      "items": [
-        { "name": "Tên mặt hàng", "price": 50000, "quantity": 1, "unit": "Cái", "total": 50000 }
-      ] 
-    }. 
-    LƯU Ý: Phải liệt kê đầy đủ, không bỏ sót dòng nào.`;
+
+
+/**
+ * OCR for Bills/Invoices - Supports multiple images
+ * @param {Array} images - Array of {data: base64, mime_type: string}
+ * @returns {Promise<Object>} - Parsed bill data
+ */
+const ocrBill = async (images) => {
+    if (!images || !Array.isArray(images) || images.length === 0) {
+        console.warn("[AI-OCR-Bill] No images provided for scanning.");
+        return { isBill: false, items: [], error: "Không có ảnh để quét" };
+    }
+
+    const ocrConfig = await getPrompt('ai_ocr_bill_prompt');
+    const promptText = ocrConfig || DEFAULT_PROMPTS.ai_ocr_bill_prompt;
 
     try {
-        console.log(`[AI-OCR-Bill] 🚀 Gửi request bóc tách ảnh tới Groq Llama-3.2 Vision (90b)...`);
-        const completion = await groq.chat.completions.create({
-            messages: [{
-                role: "user",
-                content: [
-                    { type: "text", text: promptText },
-                    { type: "image_url", image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Image}` } }
-                ]
-            }],
-            model: "llama-3.2-90b-vision-preview",
-            response_format: { type: "json_object" }
-        });
+        console.log(`[AI-OCR-Bill] 🚀 Calling Gemini 2.0 Flash for ${images.length} images...`);
+        const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
+        if (!GOOGLE_KEY) throw new Error("Missing GOOGLE_API_KEY");
 
-        const text = completion.choices[0]?.message?.content;
-        console.log("[AI-OCR-Bill] Raw Groq Response:", text);
-        const parsed = safeJsonParse(text, () => ({ error: 'Không thể parse JSON từ Groq' }));
-        console.log("[AI-OCR-Bill] Parsed Result:", JSON.stringify(parsed, null, 2));
-        return parsed;
-    } catch (err) {
-        console.error("[AI-OCR-Bill] Groq Vision failed:", err.message);
-        return { error: `Lỗi quét hóa đơn (Groq): ${err.message}` };
+        const response = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_KEY}`,
+            {
+                contents: [{
+                    parts: [
+                        { text: `${promptText}\nLƯU Ý: Nếu KHÔNG THẤY hóa đơn nào trong tất cả các ảnh, hãy trả về {"isBill": false, "items": []}. Đừng cố đoán.` },
+                        ...images.map(img => ({
+                            inline_data: { mime_type: img.mime_type || "image/jpeg", data: img.data }
+                        }))
+                    ]
+                }],
+                generationConfig: { temperature: 0.1, topK: 1, topP: 0.1 }
+            },
+            { timeout: 30000 }
+        );
+
+        if (!response.data || !response.data.candidates || !response.data.candidates[0]) {
+            throw new Error("Gemini returned invalid response structure (no candidates)");
+        }
+
+        const text = response.data.candidates[0].content.parts[0].text;
+        const result = safeJsonParse(text, () => ({ error: 'Không thể parse JSON từ Gemini', isBill: false, items: [] }));
+        
+        // Remove brand from items as requested
+        if (result && Array.isArray(result.items)) {
+            result.items = result.items.map(item => {
+                if (!item) return null;
+                const { brand, ...rest } = item;
+                return rest;
+            }).filter(i => i !== null);
+        } else if (result && result.items) {
+            console.warn("[AI-OCR-Bill] Gemini returned items as non-array:", typeof result.items);
+            result.items = [];
+        }
+        
+        console.log("[AI-OCR-Bill] Gemini Result success.");
+        return result;
+
+    } catch (geminiErr) {
+        const lastError = geminiErr.response?.data?.error?.message || geminiErr.message;
+        console.warn("[AI-OCR-Bill] Gemini failed:", lastError);
+
+        try {
+            console.log(`[AI-OCR-Bill] 🔄 Fallback to Groq Llama-4 Vision...`);
+            const completion = await groq.chat.completions.create({
+                messages: [{
+                    role: "user",
+                    content: [
+                        { type: "text", text: `${promptText}\nOutput MUST be a valid JSON.` },
+                        ...images.map(img => ({
+                            type: "image_url",
+                            image_url: { url: `data:${img.mime_type || 'image/jpeg'};base64,${img.data}` }
+                        }))
+                    ]
+                }],
+                model: "meta-llama/llama-4-scout-17b-16e-instruct",
+                response_format: { type: "json_object" }
+            });
+            const result = safeJsonParse(completion.choices[0]?.message?.content, () => ({ error: 'Groq không thể parse kết quả', items: [] }));
+            
+            if (result && Array.isArray(result.items)) {
+                result.items = result.items.map(item => {
+                    if (!item) return null;
+                    return item;
+                }).filter(i => i !== null);
+            } else if (result && result.items) {
+                result.items = [];
+            }
+
+            console.log("[AI-OCR-Bill] Groq Result success.");
+            return result;
+        } catch (groqErr) {
+            console.error("[AI-OCR-Bill] Groq failed:", groqErr.message);
+            return { error: `Cả 2 AI đều lỗi. Gemini: ${lastError} | Groq: ${groqErr.message}`, isBill: false, items: [] };
+        }
     }
 };
 
-const reconcile3Way = async (planItems, actualItems, billData) => {
+
+const reconcile3Way = async (planItems, actualItems, billItems) => {
     const dbPrompt = await getPrompt('ai_reconciliation_3way_prompt');
-    const instruction = dbPrompt || "Bạn là CHUYÊN GIA KIỂM TOÁN TÀI CHÍNH CẤP CAO. Hãy đối soát 3 bộ dữ liệu: Plan, Actual, Bill.";
+    const instruction = dbPrompt || DEFAULT_PROMPTS.ai_reconciliation_3way_prompt;
 
     const promptText = `${instruction}
-1. DỰ KIẾN (Plan): ${JSON.stringify(planItems)}
-2. THỰC NHẬP (Actual): ${JSON.stringify(actualItems)}
-3. TRÊN HÓA ĐƠN (Bill): ${JSON.stringify(billData)}
+    NHIỆM VỤ TRỌNG TÂM: Đối soát thông tin THỰC TẾ (Actual) với HÓA ĐƠN (Bill).
+    1. DANH SÁCH THỰC CHI ĐÃ NHẬN (Actual): ${JSON.stringify(actualItems)}
+    2. TRÊN HÓA ĐƠN (Bill): ${JSON.stringify(billItems)}
+    3. THAM CHIẾU KẾ HOẠCH (Plan): ${JSON.stringify(planItems)}
 
-Trả về JSON: { riskScore, riskLevel, summary, redFlags, reconciliation: [{ itemName, analysis, status }], unplannedBillItems: [] }`;
+    YÊU CẦU ĐỐI SOÁT TỪNG MỤC (BẮT BUỘC):
+    1. Mảng 'billItems' trả về phải có số lượng phần tử CHÍNH XÁC bằng số lượng phần tử trong mảng Bill đầu vào (${billItems.length} mục).
+    2. Tuyệt đối KHÔNG ĐƯỢC gộp các mặt hàng, KHÔNG ĐƯỢC bỏ sót bất kỳ dòng nào từ hóa đơn.
+    3. Với MỖI mặt hàng, bạn phải 'soi' kỹ các trường sau trong Actual:
+       - Kiểm tra Brand của Actual có nằm trong Name của Bill không?
+       - Kiểm tra Đơn vị (Unit) có khớp không?
+       - Kiểm tra Giá (Price) có khớp không (ghi rõ chênh lệch)?
+    
+    Cấu trúc trường 'analysis' cho mỗi mục:
+    - Nếu khớp: "Có trong thực chi. Khớp Tên & Brand; Khớp Đơn vị ([Tên đơn vị]); Khớp Giá ([Số tiền]đ)."
+    - Nếu lệch: "Có trong thực chi nhưng: [Ghi rõ từng điểm lệch: Lệch tên/brand, Lệch đơn vị (Bill:..., Actual:...), Lệch giá (Bill... vs Actual...)]"
+    - Nếu không có: "Sản phẩm không có trong danh sách thực chi."
+
+    Trả về JSON: { 
+        riskScore, 
+        riskLevel, 
+        summary, 
+        redFlags: [], 
+        billItems: [{ name, unit, quantity, price, total, analysis, status }],
+        reconciliation: [{ itemName, status }] 
+    }`;
+
+    console.log(`[AI-Reconciliation] ⚖️ Đang đối soát ${billItems.length} mục hóa đơn với ${actualItems.length} mục thực chi...`);
+    console.log(`[AI-Reconciliation] 📦 Dữ liệu Actual gửi lên AI:`, JSON.stringify(actualItems, null, 2));
+    console.log(`[AI-Reconciliation] 📦 Dữ liệu Bill gửi lên AI:`, JSON.stringify(billItems, null, 2));
 
     try {
-        console.log(`[AI-Reconciliation] ⚖️ Bắt đầu đối soát 3 chân bằng Llama-3.3-70b...`);
-        console.log(`[AI-Reconciliation] 📝 Prompt Length: ${promptText.length} characters`);
-        const completion = await groq.chat.completions.create({
-            messages: [{ role: "user", content: promptText }],
-            model: "llama-3.3-70b-versatile",
-            response_format: { type: "json_object" }
-        });
-        const result = safeJsonParse(completion.choices[0]?.message?.content, () => ({}));
-        console.log(`[AI-Reconciliation] ✅ Kết quả đối soát:`, JSON.stringify(result, null, 2));
+        let apiKey = process.env.PERPLEXITY_API_KEY;
+        
+        // Fetch from BE if not in local .env
+        if (!apiKey) {
+            console.log(`[AI-Reconciliation] 🔍 Fetching PERPLEXITY_API_KEY from Backend...`);
+            const config = await getPrompt('PERPLEXITY_API_KEY');
+            apiKey = config?.configValue;
+        }
+
+        if (!apiKey) {
+            throw new Error('PERPLEXITY_API_KEY not found in local .env or Backend system-configs');
+        }
+
+        console.log(`[AI-Reconciliation] 🚀 Calling Perplexity Sonar-Pro...`);
+        const response = await axios.post(
+            'https://api.perplexity.ai/chat/completions',
+            {
+                model: 'sonar-pro',
+                messages: [
+                    { role: "system", content: "You are an expert auditor. Always output valid JSON." },
+                    { role: "user", content: promptText }
+                ],
+                temperature: 0
+            },
+            { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } }
+        );
+
+        const result = safeJsonParse(response.data.choices[0]?.message?.content, () => ({}));
+        console.log(`[AI-Reconciliation] ✅ Kết quả đối soát (Perplexity):`, JSON.stringify(result, null, 2));
         return result;
     } catch (err) {
-        console.error("[AI-Reconciliation] Groq failed:", err.message);
-        return { error: "Lỗi đối soát dữ liệu" };
+        const errorDetail = err.response?.data || err.message;
+        console.error("[AI-Reconciliation] ❌ Perplexity failed:", JSON.stringify(errorDetail, null, 2));
+        return { error: `Lỗi đối soát dữ liệu qua Perplexity: ${err.message}` };
     }
 };
 
 
 const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, plannedItems, photoUrls, createdAt) => {
-    console.log(`[AI-Evidence] Starting analysis for ${photoUrls.length} images...`);
+    console.log(`[AI-Evidence] Starting analysis for ${photoUrls ? photoUrls.length : 0} images...`);
+
+    if (!Array.isArray(photoUrls) || photoUrls.length === 0) {
+        return { error: "Danh sách ảnh minh chứng trống." };
+    }
 
     // Phase 0: Fetch images in parallel
     const imagePromises = photoUrls.map(url => fetchImageAsBase64(url));
     const images = (await Promise.all(imagePromises)).filter(img => img !== null);
 
-    if (images.length === 0) return { error: "Không tải được ảnh minh chứng." };
+    if (images.length === 0) {
+        console.error("[AI-Evidence] ❌ Failed to load any images from URLs:", photoUrls);
+        return { error: "Không tải được ảnh minh chứng từ link đã cung cấp." };
+    }
 
     try {
         // Phase 1 & 2: Forensics and OCR in parallel to save time
@@ -363,69 +499,82 @@ const analyzeEvidence = async (expenditureId, plan, purpose, totalAmount, planne
 
         const [forensicsResult, billData] = await Promise.all([
             runForensics(normalizeUrl(photoUrls[0])),
-            extractBillDataWithGroq(images[0].data, images[0].mime_type)
+            ocrBill(images)
         ]);
 
+        console.log(`[AI-Evidence] OCR Bill data received. isBill: ${billData?.isBill}`);
+
         // Phase 3: 3-Way Reconciliation
-        // Proceed even if isBill is false (AI might be wrong, or user wants to see data anyway)
         const isActuallyBill = billData.error ? false : (billData.isBill !== false);
 
-        // Phase 3: 3-Way Reconciliation
-        // Map all requested fields for plan and actual
-        const planItems = plannedItems.map(item => ({
-            name: item.name,
-            expected_price: item.expectedPrice ?? item.expected_price,
-            expected_quantity: item.expectedQuantity ?? item.expected_quantity,
-            expected_unit: item.expectedUnit ?? item.expected_unit,
-            expected_brand: item.expectedBrand ?? item.expected_brand,
-            expected_note: item.expectedNote ?? item.expected_note,
-            expected_purchase_location: item.expectedPurchaseLocation ?? item.expected_purchase_location
-        }));
+        // Ensure plannedItems is an array
+        const safePlannedItems = Array.isArray(plannedItems) ? plannedItems : [];
 
-        const actualItems = plannedItems.map(item => ({
-            name: item.name,
-            actual_price: item.actualPrice ?? item.actual_price ?? item.price ?? item.expectedPrice ?? item.expected_price,
-            actual_quantity: item.actualQuantity ?? item.actual_quantity ?? item.expectedQuantity ?? item.expected_quantity,
-            actual_brand: item.actualBrand ?? item.actual_brand ?? item.expectedBrand ?? item.expected_brand,
-            actual_unit: item.actualUnit ?? item.actual_unit ?? item.expectedUnit ?? item.expected_unit,
-            purchase_location: item.actualPurchaseLocation ?? item.actual_purchase_location ?? item.expectedPurchaseLocation ?? item.expected_purchase_location
-        }));
+        const planItems = safePlannedItems.map(item => {
+            if (!item) return null;
+            return {
+                name: item.name || "Không rõ",
+                expected_price: item.expectedPrice ?? item.expected_price ?? 0,
+                expected_quantity: item.expectedQuantity ?? item.expected_quantity ?? 0,
+                expected_unit: item.expectedUnit ?? item.expected_unit ?? "",
+                expected_brand: item.expectedBrand ?? item.expected_brand ?? "",
+                expected_note: item.expectedNote ?? item.expected_note ?? "",
+                expected_purchase_location: item.expectedPurchaseLocation ?? item.expected_purchase_location ?? ""
+            };
+        }).filter(i => i !== null);
+
+        const actualItems = safePlannedItems.map(item => {
+            if (!item) return null;
+            return {
+                name: item.name || "Không rõ",
+                actual_price: item.actualPrice ?? item.actual_price ?? item.price ?? item.expectedPrice ?? item.expected_price ?? 0,
+                actual_quantity: item.actualQuantity ?? item.actual_quantity ?? item.expectedQuantity ?? item.expected_quantity ?? 0,
+                actual_brand: item.actualBrand ?? item.actual_brand ?? item.expectedBrand ?? item.expected_brand ?? "",
+                actual_unit: item.actualUnit ?? item.actual_unit ?? item.expectedUnit ?? item.expected_unit ?? "",
+                purchase_location: item.actualPurchaseLocation ?? item.actual_purchase_location ?? item.expectedPurchaseLocation ?? item.expected_purchase_location ?? ""
+            };
+        }).filter(i => i !== null);
 
         console.log(`[AI-Evidence] Phase 3: 3-Way Reconciliation via Llama-70b...`);
-        const reconciliationData = await reconcile3Way(planItems, actualItems, billData.items || []);
+        const billItemsForReconciliation = Array.isArray(billData.items) ? billData.items : [];
+        const reconciliationData = await reconcile3Way(planItems, actualItems, billItemsForReconciliation);
 
         // Merge results
         const finalResult = {
             isBill: isActuallyBill,
-            isElectronicInvoice: billData.isElectronicInvoice,
-            vendorTaxCode: billData.vendorTaxCode,
-            vendorName: billData.vendorName,
-            billItems: billData.items || [], // Lưu lại dữ liệu thô để hiển thị bảng Bill riêng
-            forensics: forensicsResult,
+            isElectronicInvoice: billData.isElectronicInvoice || false,
+            vendorTaxCode: billData.vendorTaxCode || "",
+            vendorName: billData.vendorName || "",
+            billItems: reconciliationData.billItems || billItemsForReconciliation, 
+            forensics: forensicsResult || { isManipulated: false, warnings: [] },
             ...reconciliationData
         };
 
         // Nếu Forensics phát hiện chỉnh sửa, tăng risk score lên mức cao nhất
-        if (forensicsResult.isManipulated) {
+        if (forensicsResult && forensicsResult.isManipulated) {
             finalResult.riskScore = 100;
             finalResult.riskLevel = 'HIGH';
             finalResult.redFlags = finalResult.redFlags || [];
-            finalResult.redFlags.push("PHÁT HIỆN DẤU VẾT CHỈNH SỬA ẢNH (PHOTOSHOP/PICSART)!");
+            if (!finalResult.redFlags.includes("PHÁT HIỆN DẤU VẾT CHỈNH SỬA ẢNH (PHOTOSHOP/PICSART)!")) {
+                finalResult.redFlags.push("PHÁT HIỆN DẤU VẾT CHỈNH SỬA ẢNH (PHOTOSHOP/PICSART)!");
+            }
         }
 
+        console.log(`[AI-Evidence] Analysis pipeline completed successfully.`);
         return finalResult;
     } catch (error) {
-        console.error('[AI-Evidence] Pipeline Error:', error.message);
+        console.error('[AI-Evidence] Pipeline Error:', error.message, error.stack);
         throw error;
     }
 };
 
 
 
+
 const generateSuggestionLabels = async ({ amount, options }) => {
     try {
         const dbPrompt = await getPrompt('ai_suggestion_labels_prompt');
-        const instruction = dbPrompt || "Gợi ý 3-5 nhãn phân loại phù hợp rả về mảng chuỗi JSON.";
+        const instruction = dbPrompt || DEFAULT_PROMPTS.ai_suggestion_labels_prompt;
 
         const completion = await groq.chat.completions.create({
             messages: [{
@@ -445,6 +594,7 @@ module.exports = {
     generateCampaignDescription,
     parseExpenditureFromText,
     ocrKYC,
+    ocrBill,
     analyzeFlag,
     analyzeExpenditure,
     analyzeEvidence,
