@@ -73,7 +73,7 @@ const generateCampaignDescription = async (prompt, rules = "") => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `${instruction}\nDựa trên thông tin: "${prompt}".`
+                content: `${instruction}\nDựa trên thông tin: "${prompt}".\nTrả về kết quả dưới dạng JSON.`
             }],
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" }
@@ -125,22 +125,47 @@ const ocrKYC = async (imageBuffer, mimeType, side = 'front') => {
             : "Extract back side ID info to JSON: {issueDate, issuePlace}.");
 
     try {
-        console.log(`[AI-OCR] Calling Groq Llama-3.2 Vision for ${side} side...`);
-        const completion = await groq.chat.completions.create({
-            messages: [{
-                role: "user",
-                content: [
-                    { type: "text", text: promptText },
-                    { type: "image_url", image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Image}` } }
-                ]
-            }],
-            model: "llama-3.2-90b-vision-preview",
-            response_format: { type: "json_object" }
-        });
-        return safeJsonParse(completion.choices[0]?.message?.content, () => ({ error: 'Groq không thể parse kết quả KYC' }));
-    } catch (error) {
-        console.error("[AI-OCR] Groq Vision failed:", error.message);
-        return { error: `Lỗi quét căn cước (Groq): ${error.message}` };
+        console.log(`[AI-OCR] Calling Gemini v1 for ${side} side...`);
+        const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
+        if (!GOOGLE_KEY) throw new Error("Missing GOOGLE_API_KEY in environment");
+
+        const response = await axios.post(
+            `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_KEY}`,
+            {
+                contents: [{
+                    parts: [
+                        { text: `${promptText}\nOutput MUST be a valid JSON.` },
+                        { inline_data: { mime_type: mimeType || "image/jpeg", data: base64Image } }
+                    ]
+                }],
+                generationConfig: { temperature: 0.1, topK: 1, topP: 0.1 }
+            },
+            { timeout: 30000 }
+        );
+
+        const text = response.data.candidates[0].content.parts[0].text;
+        return safeJsonParse(text, () => ({ error: 'Không thể parse JSON từ Gemini' }));
+    } catch (geminiErr) {
+        const lastError = geminiErr.response?.data?.error?.message || geminiErr.message;
+        console.warn("[AI-OCR] Gemini failed:", lastError);
+
+        try {
+            console.log(`[AI-OCR] Fallback to Groq (${side} side)...`);
+            const completion = await groq.chat.completions.create({
+                messages: [{
+                    role: "user",
+                    content: [
+                        { type: "text", text: `${promptText}\nOutput MUST be a valid JSON.` },
+                        { type: "image_url", image_url: { url: `data:${mimeType || 'image/jpeg'};base64,${base64Image}` } }
+                    ]
+                }],
+                model: "llama-3.2-90b-vision-preview",
+                response_format: { type: "json_object" }
+            });
+            return safeJsonParse(completion.choices[0]?.message?.content, () => ({ error: 'Groq không thể parse kết quả' }));
+        } catch (groqErr) {
+            return { error: `Cả 2 AI đều lỗi. Gemini: ${lastError} | Groq: ${groqErr.message}` };
+        }
     }
 };
 
@@ -405,7 +430,7 @@ const generateSuggestionLabels = async ({ amount, options }) => {
         const completion = await groq.chat.completions.create({
             messages: [{
                 role: "user",
-                content: `${instruction}\nDựa trên số tiền ${amount} và các lựa chọn ${JSON.stringify(options)}.`
+                content: `${instruction}\nDựa trên số tiền ${amount} và các lựa chọn ${JSON.stringify(options)}.\nTrả về JSON chứa mảng labels.`
             }],
             model: "llama-3.1-8b-instant",
             response_format: { type: "json_object" }
